@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/limitbook-core", "crates/limitbook-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/AarinB1/limitbook"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

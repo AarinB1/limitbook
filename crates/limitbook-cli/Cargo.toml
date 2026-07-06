@@ -1,0 +1,15 @@
+[package]
+name = "limitbook-cli"
+description = "CLI for limitbook: fixture generation and (later) feed replay/benchmarking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "limitbook"
+path = "src/main.rs"
+
+[dependencies]
+limitbook-core = { path = "../limitbook-core" }
+flate2 = "1"
