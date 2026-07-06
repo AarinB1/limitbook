@@ -155,8 +155,12 @@ fn filter_stream(
         let body = &mut payload[..len];
         match read_exact_or_end(&mut reader, body) {
             Ok(true) => {}
-            Ok(false) | Err(_) => {
+            Ok(false) => {
                 truncation_warning(&io::Error::from(io::ErrorKind::UnexpectedEof), stats.read)?;
+                break;
+            }
+            Err(e) => {
+                truncation_warning(&e, stats.read)?;
                 break;
             }
         }
@@ -165,7 +169,14 @@ fn filter_stream(
         let ty = body[0];
         let locate = u16::from_be_bytes([body[1], body[2]]);
         if ty == b'R' {
-            let symbol = trim_trailing_spaces(&body[11..19]);
+            let Some(stock_field) = body.get(11..19) else {
+                return Err(format!(
+                    "invalid Stock Directory (R) message at message {}: length {len} is too \
+                     short for the Stock field (offset 11, 8 bytes)",
+                    stats.read
+                ));
+            };
+            let symbol = trim_trailing_spaces(stock_field);
             if symbols.contains(symbol) {
                 wanted_locates.insert(locate);
             }
