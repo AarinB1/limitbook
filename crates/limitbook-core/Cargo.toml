@@ -1,0 +1,16 @@
+[package]
+name = "limitbook-core"
+description = "Zero-copy NASDAQ ITCH 5.0 parser and limit order book (pure computation, wasm-compatible)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# This crate is pure computation over byte slices: no file/OS I/O, and every
+# dependency must build for wasm32-unknown-unknown (CI enforces this).
+[dependencies]
+
+[dev-dependencies]
+# Dev-only: used by host-side tests to decompress the checked-in fixture.
+# Dev-dependencies do not affect the wasm library build.
+flate2 = "1"
