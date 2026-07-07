@@ -30,8 +30,10 @@ integers big-endian; sample files frame each payload with a u16 length prefix.
 
 ## Build phases
 
-0. Scaffolding + ground truth (done) → 1. zero-copy parser → 2. order book →
-3. throughput/benchmarks + queue-position tracking → 4. WASM browser demo.
+0. Scaffolding + ground truth (done) → 1. zero-copy parser (done) →
+2. order book (done; `limitbook replay` replays the fixture with zero
+invariant violations) → 3. throughput/benchmarks + queue-position tracking →
+4. WASM browser demo.
 
 ## CI
 

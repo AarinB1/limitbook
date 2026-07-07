@@ -8,20 +8,35 @@ use std::process::ExitCode;
 
 use limitbook_core::frame::MIN_MESSAGE_LEN;
 
-const USAGE: &str = "\
-Usage: limitbook make-fixture --input <capture(.gz)> --output <fixture.itch.gz> --symbols <A,B,...>
+mod replay_cmd;
 
-Reads a NASDAQ TotalView-ITCH 5.0 capture (raw or gzipped, may be a truncated
-prefix of a sample day) and writes a gzipped, length-prefixed fixture
-containing every System Event message plus the complete message stream for
-the given stock symbols, selected by their Stock Locate codes as announced
-in Stock Directory (R) messages.
+const USAGE: &str = "\
+Usage: limitbook <command> [options]
+
+Commands:
+  replay        Stream a capture through parse + order book and report
+                message counts, book activity, peak depth, and invariant
+                results. Exits nonzero on any violation.
+  make-fixture  Write a gzipped, symbol-filtered fixture from a capture.
+
+Run a command without options for its usage. Captures may be raw or
+gzipped, including truncated prefixes of a NASDAQ sample day.
 ";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("make-fixture") => make_fixture(&args[1..]),
+        Some("replay") => {
+            return match replay_cmd::replay(&args[1..]) {
+                Ok(true) => ExitCode::SUCCESS,
+                Ok(false) => ExitCode::FAILURE, // report printed; violations found
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
         _ => {
             eprint!("{USAGE}");
             return ExitCode::FAILURE;
@@ -35,6 +50,16 @@ fn main() -> ExitCode {
         }
     }
 }
+
+const MAKE_FIXTURE_USAGE: &str = "\
+Usage: limitbook make-fixture --input <capture(.gz)> --output <fixture.itch.gz> --symbols <A,B,...>
+
+Reads a NASDAQ TotalView-ITCH 5.0 capture (raw or gzipped, may be a truncated
+prefix of a sample day) and writes a gzipped, length-prefixed fixture
+containing every System Event message plus the complete message stream for
+the given stock symbols, selected by their Stock Locate codes as announced
+in Stock Directory (R) messages.
+";
 
 fn make_fixture(args: &[String]) -> Result<(), String> {
     let mut input = None;
@@ -58,13 +83,13 @@ fn make_fixture(args: &[String]) -> Result<(), String> {
                     }
                 }
             }
-            other => return Err(format!("unknown argument: {other}\n{USAGE}")),
+            other => return Err(format!("unknown argument: {other}\n{MAKE_FIXTURE_USAGE}")),
         }
     }
-    let input = input.ok_or_else(|| format!("--input is required\n{USAGE}"))?;
-    let output = output.ok_or_else(|| format!("--output is required\n{USAGE}"))?;
+    let input = input.ok_or_else(|| format!("--input is required\n{MAKE_FIXTURE_USAGE}"))?;
+    let output = output.ok_or_else(|| format!("--output is required\n{MAKE_FIXTURE_USAGE}"))?;
     if symbols.is_empty() {
-        return Err(format!("--symbols is required\n{USAGE}"));
+        return Err(format!("--symbols is required\n{MAKE_FIXTURE_USAGE}"));
     }
 
     let reader = open_capture(&input).map_err(|e| format!("open {input}: {e}"))?;
@@ -93,7 +118,7 @@ fn make_fixture(args: &[String]) -> Result<(), String> {
 }
 
 /// Opens a capture file, transparently gunzipping if it has the gzip magic.
-fn open_capture(path: &str) -> io::Result<Box<dyn Read>> {
+pub(crate) fn open_capture(path: &str) -> io::Result<Box<dyn Read>> {
     let mut file = File::open(path)?;
     let mut magic = [0u8; 2];
     let n = file.read(&mut magic)?;
@@ -196,7 +221,7 @@ fn filter_stream(
 
 /// Reads exactly `buf.len()` bytes. Returns `Ok(false)` on a clean EOF
 /// before any byte was read, `Err` on EOF partway through.
-fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<bool> {
+pub(crate) fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<bool> {
     let mut filled = 0;
     while filled < buf.len() {
         match reader.read(&mut buf[filled..]) {
@@ -212,7 +237,7 @@ fn read_exact_or_end(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<bool>
 
 /// A truncated gzip prefix of a sample day ends mid-stream; that is expected
 /// and the messages read so far are still usable. Anything else is fatal.
-fn truncation_warning(e: &io::Error, messages_read: u64) -> Result<(), String> {
+pub(crate) fn truncation_warning(e: &io::Error, messages_read: u64) -> Result<(), String> {
     if e.kind() == io::ErrorKind::UnexpectedEof && messages_read > 0 {
         eprintln!(
             "note: input ended mid-stream after {messages_read} messages \
