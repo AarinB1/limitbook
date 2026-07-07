@@ -46,6 +46,7 @@ pub fn replay(args: &[String]) -> Result<bool, String> {
     let mut reader = open_capture(&input).map_err(|e| format!("open {input}: {e}"))?;
     let mut engine = Replay::new(verify_every);
     let mut payload = vec![0u8; u16::MAX as usize];
+    let mut framing_error = None;
     loop {
         let mut prefix = [0u8; 2];
         match read_exact_or_end(&mut reader, &mut prefix) {
@@ -58,20 +59,29 @@ pub fn replay(args: &[String]) -> Result<bool, String> {
         }
         let len = u16::from_be_bytes(prefix) as usize;
         if len < MIN_MESSAGE_LEN {
-            return Err(format!(
+            let error = format!(
                 "invalid frame after {} messages: length {len} is below the \
                  {MIN_MESSAGE_LEN}-byte uniform header",
                 engine.stats().messages
-            ));
+            );
+            if engine.stats().messages == 0 {
+                return Err(error);
+            }
+            framing_error = Some(error);
+            break;
         }
         let body = &mut payload[..len];
         match read_exact_or_end(&mut reader, body) {
             Ok(true) => {}
-            Ok(false) | Err(_) => {
+            Ok(false) => {
                 truncation_warning(
                     &std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
                     engine.stats().messages,
                 )?;
+                break;
+            }
+            Err(e) => {
+                truncation_warning(&e, engine.stats().messages)?;
                 break;
             }
         }
@@ -80,6 +90,9 @@ pub fn replay(args: &[String]) -> Result<bool, String> {
     engine.finish();
 
     print_report(&input, &engine, verify_every);
+    if let Some(error) = framing_error {
+        return Err(error);
+    }
     Ok(engine.clean())
 }
 
