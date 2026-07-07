@@ -22,4 +22,11 @@
 #![no_std]
 #![deny(unsafe_code)]
 
+// Book reconstruction needs heap collections; `alloc` keeps the crate
+// no_std + wasm-clean (the wasm demo supplies a global allocator).
+extern crate alloc;
+
+pub mod book;
 pub mod frame;
+pub mod parse;
+pub mod replay;

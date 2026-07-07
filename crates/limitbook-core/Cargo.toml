@@ -9,8 +9,16 @@ repository.workspace = true
 # This crate is pure computation over byte slices: no file/OS I/O, and every
 # dependency must build for wasm32-unknown-unknown (CI enforces this).
 [dependencies]
+# Order-id -> order index for the book. no_std; its default hasher
+# (foldhash, the successor to ahash as hashbrown's default) is a fast
+# non-cryptographic hasher that needs no OS randomness, so it builds for
+# wasm32-unknown-unknown.
+hashbrown = "0.16"
 
 [dev-dependencies]
 # Dev-only: used by host-side tests to decompress the checked-in fixture.
 # Dev-dependencies do not affect the wasm library build.
 flate2 = "1"
+# Property-based tests: parser never panics, encode/decode round-trips,
+# random valid op sequences keep the book self-consistent.
+proptest = "1"
