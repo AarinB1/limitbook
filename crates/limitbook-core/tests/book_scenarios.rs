@@ -429,6 +429,7 @@ fn crossed_book_scoped_to_continuous_trading() {
         !m.in_continuous_trading(1),
         "pre-open: cross invariant out of scope"
     );
+    assert!(!m.cross_violation(1));
 
     // System hours alone don't start continuous trading...
     ok(&mut m, system_event(EventCode::StartOfSystemHours));
@@ -440,25 +441,139 @@ fn crossed_book_scoped_to_continuous_trading() {
     assert!(m.market_hours());
     assert_eq!(m.trading_state(1), TradingState::Halted);
     assert!(!m.in_continuous_trading(1));
+    assert!(!m.cross_violation(1));
 
+    // Released while still crossed (Nasdaq sequences the "T" action inside
+    // the reopening-cross unwind): in continuous trading, but the invariant
+    // is not yet armed — pending, not violating.
     ok(&mut m, trading_action(1, TradingState::Trading));
     assert!(m.in_continuous_trading(1));
-    assert!(m.crossed(1), "still crossed — now it IS a violation");
+    assert!(m.crossed(1));
+    assert!(!m.cross_violation(1), "unwind window: suppressed");
+    assert!(m.cross_check_pending(1), "…but tracked as pending");
 
-    // Uncross: delete the aggressive bid; a locked book (bid == ask) still
-    // counts as crossed.
+    // The unwind completes: deleting the aggressive bid uncrosses the book,
+    // which arms the invariant.
     ok(&mut m, delete(1, 10));
     assert!(!m.crossed(1));
+    assert!(!m.cross_check_pending(1));
+
+    // From now on a crossing IS a violation; a locked book (bid == ask)
+    // counts.
     ok(&mut m, add(1, 11, Side::Buy, 100, 50_000));
     assert!(m.crossed(1), "locked book (bid == ask) counts");
+    assert!(m.cross_violation(1), "armed: real violation");
 
-    // A halt takes the stock back out of scope; end of market hours too.
+    // A halt takes the stock back out of scope and disarms; the next
+    // release with an uncrossed book re-arms immediately.
     ok(&mut m, trading_action(1, TradingState::Halted));
     assert!(!m.in_continuous_trading(1));
+    assert!(!m.cross_violation(1));
+    ok(&mut m, delete(1, 11)); // uncross while halted
     ok(&mut m, trading_action(1, TradingState::Trading));
     assert!(m.in_continuous_trading(1));
+    ok(&mut m, add(1, 12, Side::Buy, 100, 50_000));
+    assert!(m.cross_violation(1), "re-armed on uncrossed release");
+
+    // End of market hours ends enforcement.
     ok(&mut m, system_event(EventCode::EndOfMarketHours));
     assert!(!m.in_continuous_trading(1));
+    assert!(!m.cross_violation(1));
+}
+
+/// The exact sequence observed at halt reopens on the 2019-12-30 sample
+/// day (e.g. ARDS 15:04:06): executions unwind the crossed quote-period
+/// interest AROUND the "T" release action; the invariant must stay quiet
+/// through the unwind and arm the moment the book is clean.
+#[test]
+fn reopen_unwind_straddling_release_is_not_a_violation() {
+    let mut m = Market::new();
+    ok(&mut m, system_event(EventCode::StartOfMarketHours));
+    ok(&mut m, trading_action(1, TradingState::Trading));
+
+    // Healthy continuous trading, armed.
+    ok(&mut m, add(1, 1, Side::Buy, 100, 50_000));
+    ok(&mut m, add(1, 2, Side::Sell, 100, 51_000));
+    assert!(!m.cross_violation(1));
+
+    // LULD pause; quotation-only period accumulates crossing displayable
+    // interest (legal outside Trading state).
+    ok(&mut m, trading_action(1, TradingState::Paused));
+    ok(&mut m, trading_action(1, TradingState::QuotationOnly));
+    ok(&mut m, add(1, 3, Side::Buy, 300, 53_000)); // crosses ask 51
+    assert!(m.crossed(1));
+    assert!(!m.cross_violation(1), "quote-only period: out of scope");
+
+    // Reopen: part of the cross unwinds, then the release action arrives
+    // with the book still crossed, then the unwind finishes.
+    ok(&mut m, exec(1, 3, 100)); // partial unwind, still crossed
+    ok(&mut m, trading_action(1, TradingState::Trading));
+    assert!(m.crossed(1));
+    assert!(!m.cross_violation(1), "released mid-unwind: suppressed");
+    assert!(m.cross_check_pending(1));
+    ok(&mut m, exec(1, 3, 100)); // still crossed (100 left at 53)
+    assert!(!m.cross_violation(1));
+    ok(&mut m, exec(1, 3, 100)); // order 3 dead: book uncrossed, arms
+    assert!(!m.crossed(1));
+    assert!(!m.cross_check_pending(1));
+
+    // Armed again: a genuine crossing after the reopen is a violation.
+    ok(&mut m, add(1, 4, Side::Sell, 50, 49_000));
+    assert!(m.cross_violation(1));
+}
+
+/// Stock Directory Authenticity "T" (spec §1.2.1) marks Nasdaq test
+/// instruments; the cross invariant never binds them.
+#[test]
+fn test_securities_exempt_from_cross_invariant() {
+    use limitbook_core::parse::StockDirectory;
+    let directory = |locate: u16, authenticity: u8| -> Message<'static> {
+        Message::StockDirectory(StockDirectory {
+            header: hdr(locate),
+            stock: b"ZJZZT   ",
+            market_category: b'Q',
+            financial_status: b'N',
+            round_lot_size: 100,
+            round_lots_only: b'N',
+            issue_classification: b'C',
+            issue_subtype: b"Z ",
+            authenticity,
+            short_sale_threshold: b'N',
+            ipo_flag: b'N',
+            luld_reference_price_tier: b'1',
+            etp_flag: b'N',
+            etp_leverage_factor: 0,
+            inverse_indicator: b'N',
+        })
+    };
+
+    let mut m = Market::new();
+    ok(&mut m, directory(1, b'T')); // test instrument
+    ok(&mut m, directory(2, b'P')); // production
+    assert!(m.is_test_security(1));
+    assert!(!m.is_test_security(2));
+
+    ok(&mut m, system_event(EventCode::StartOfMarketHours));
+    for locate in [1, 2] {
+        ok(&mut m, trading_action(locate, TradingState::Trading));
+        ok(
+            &mut m,
+            add(locate, u64::from(locate) * 10, Side::Buy, 100, 50_000),
+        );
+        ok(
+            &mut m,
+            add(locate, u64::from(locate) * 10 + 1, Side::Sell, 100, 51_000),
+        );
+        // Armed while uncrossed, then genuinely crossed.
+        ok(
+            &mut m,
+            add(locate, u64::from(locate) * 10 + 2, Side::Buy, 10, 52_000),
+        );
+        assert!(m.crossed(locate));
+    }
+    assert!(!m.cross_violation(1), "test security: exempt");
+    assert!(!m.cross_check_pending(1), "test security: never pending");
+    assert!(m.cross_violation(2), "production security: enforced");
 }
 
 #[test]
