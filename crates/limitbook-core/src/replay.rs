@@ -250,7 +250,24 @@ impl Replay {
 
     /// Checks the crossed-book invariant for one locate right now.
     fn check_crossed(&mut self, msg_index: u64, locate: u16) {
-        if self.market.in_continuous_trading(locate) && self.market.crossed(locate) {
+        if self.market.cross_violation(locate) {
+            self.record(msg_index, ViolationKind::CrossedInContinuous { locate });
+        }
+    }
+
+    /// Backstop for the reopening-cross grace: any production book still
+    /// crossed and never re-armed since its last release is a persistent
+    /// crossing — a real violation the arming suppression must not hide.
+    /// Run while market hours are still in force (just before the message
+    /// ending them is applied, and at end of stream).
+    fn check_pending_crossings(&mut self, msg_index: u64) {
+        let pending: Vec<u16> = self
+            .market
+            .books()
+            .map(|(locate, _)| locate)
+            .filter(|&locate| self.market.cross_check_pending(locate))
+            .collect();
+        for locate in pending {
             self.record(msg_index, ViolationKind::CrossedInContinuous { locate });
         }
     }
@@ -278,6 +295,21 @@ impl Replay {
         self.stats.last_timestamp = header.timestamp;
 
         match &msg {
+            Message::SystemEvent(m) => {
+                // Market hours are about to end: report books that stayed
+                // crossed from their last release to the close (the arming
+                // suppression window closed without ever re-arming).
+                if self.market.market_hours()
+                    && matches!(
+                        m.event_code,
+                        EventCode::EndOfMarketHours
+                            | EventCode::EndOfSystemHours
+                            | EventCode::EndOfMessages
+                    )
+                {
+                    self.check_pending_crossings(idx);
+                }
+            }
             Message::StockDirectory(m) => {
                 self.symbols.insert(header.stock_locate, *m.stock);
             }
@@ -441,11 +473,15 @@ impl Replay {
         }
     }
 
-    /// Runs the final deep consistency check. Call once after the last
-    /// [`feed`](Self::feed).
+    /// Runs the final deep consistency check (and, if the stream ended with
+    /// market hours still in force, the persistent-crossing backstop). Call
+    /// once after the last [`feed`](Self::feed).
     pub fn finish(&mut self) {
+        let idx = self.stats.messages.saturating_sub(1);
+        if self.market.market_hours() {
+            self.check_pending_crossings(idx);
+        }
         if let Err(e) = self.market.verify() {
-            let idx = self.stats.messages.saturating_sub(1);
             self.record(idx, ViolationKind::Consistency(e));
         }
     }

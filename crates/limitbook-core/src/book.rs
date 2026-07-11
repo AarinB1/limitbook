@@ -22,15 +22,38 @@
 //! Every mutation is validated in full before any state changes ([`apply`]
 //! is atomic: on `Err` the market is untouched). The CLAUDE.md invariants
 //! are enforced structurally: executions and cancels beyond resting shares
-//! and mutations of unknown orders are typed [`BookError`]s, and crossed
-//! books can be monitored via [`Market::crossed`] scoped by
-//! [`Market::in_continuous_trading`] (pre-open books legitimately cross).
+//! and mutations of unknown orders are typed [`BookError`]s, and the
+//! crossed-book invariant is checked via [`Market::cross_violation`].
 //! [`Market::verify`] re-derives all cached aggregates from first
 //! principles for use as a deep self-check during replay and tests.
 //!
+//! # Crossed-book invariant scope
+//!
+//! "Best bid < best ask" holds only while a security is genuinely in
+//! continuous trading, and the feed makes the boundary subtle. Validated
+//! against the full 2019-12-30 sample day (268.7M messages):
+//!
+//! - Pre-open and halted books legitimately cross (quotation-only periods
+//!   accumulate crossing displayable orders for the reopening auction), so
+//!   scope requires market hours plus a Trading state.
+//! - Nasdaq serializes a reopening cross over many messages and emits the
+//!   "T" (released for trading) action *mid-unwind* — observed ordering:
+//!   non-printable "C" executions at the cross price, the "Q" cross print,
+//!   the "H"/"T" release, then more "C" executions, microseconds apart. The
+//!   displayed book legitimately stays crossed until the unwind finishes,
+//!   so any trading-state transition disarms the invariant and it re-arms
+//!   at the first uncrossed sighting. A book that never re-arms is real
+//!   trouble and is surfaced by [`Market::cross_check_pending`] (the replay
+//!   engine reports any still pending when market hours end). Every one of
+//!   the 664 crossings the naive scope flagged on the sample day sits in
+//!   such a window; zero survive with arming, and zero occur elsewhere.
+//! - Stock Directory entries with Authenticity "T" (spec §1.2.1) are Nasdaq
+//!   test instruments (e.g. ZJZZT); market invariants do not bind them and
+//!   they are exempt.
+//!
 //! [`apply`]: Market::apply
 
-use alloc::collections::{BTreeMap, VecDeque};
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use hashbrown::{HashMap, HashSet};
 
@@ -265,6 +288,20 @@ pub struct Market {
     /// Last Stock Trading Action state per locate. A security absent from
     /// the pre-opening spin is treated as halted (spec §1.2.2).
     trading_state: BTreeMap<u16, TradingState>,
+    /// Locates whose Stock Directory entry carries Authenticity "T" — Nasdaq
+    /// test instruments (spec §1.2.1), exempt from market invariants.
+    test_securities: BTreeSet<u16>,
+    /// Locates whose cross invariant is armed: the book has been observed
+    /// uncrossed in continuous trading since the stock's last trading-state
+    /// transition. Nasdaq releases a halted stock ("T" action) while the
+    /// reopening cross is still being serialized onto the feed (observed on
+    /// the 2019-12-30 sample day: C executions -> Q cross print -> H "T"
+    /// action -> further C executions, all within microseconds), so a book
+    /// can legitimately sit crossed briefly after release. Arming starts
+    /// enforcement at the first uncrossed sighting; a book that NEVER
+    /// re-arms before market close is surfaced by
+    /// [`Market::cross_check_pending`].
+    armed: BTreeSet<u16>,
 }
 
 impl Market {
@@ -273,25 +310,50 @@ impl Market {
     }
 
     /// Applies one decoded message. Order-flow messages mutate the book;
-    /// "S"/"H" update trading-phase state; everything else is a no-op.
-    /// Atomic: on `Err` no state changed.
+    /// "S"/"H"/"R" update trading-phase and scope state; everything else is
+    /// a no-op. Atomic: on `Err` no state changed.
     pub fn apply(&mut self, msg: &Message<'_>) -> Result<Effect, BookError> {
-        match msg {
+        let effect = match msg {
             Message::SystemEvent(m) => {
                 match m.event_code {
                     EventCode::StartOfMarketHours => self.market_hours = true,
                     // "M" ends market hours; "E"/"C" end the day outright.
                     EventCode::EndOfMarketHours
                     | EventCode::EndOfSystemHours
-                    | EventCode::EndOfMessages => self.market_hours = false,
+                    | EventCode::EndOfMessages => {
+                        self.market_hours = false;
+                        self.armed.clear();
+                    }
                     _ => {}
                 }
-                Ok(Effect::None)
+                // Phase changes move every book in or out of cross-invariant
+                // scope; re-evaluate arming across the board (a handful of
+                // system events per day).
+                let locates: alloc::vec::Vec<u16> = self.books.keys().copied().collect();
+                for locate in locates {
+                    self.refresh_armed(locate);
+                }
+                Effect::None
+            }
+            Message::StockDirectory(m) => {
+                // Authenticity "T" marks Nasdaq test instruments
+                // (spec §1.2.1); market invariants do not apply to them.
+                if m.authenticity == b'T' {
+                    self.test_securities.insert(m.header.stock_locate);
+                }
+                Effect::None
             }
             Message::StockTradingAction(m) => {
-                self.trading_state
-                    .insert(m.header.stock_locate, m.trading_state);
-                Ok(Effect::None)
+                let locate = m.header.stock_locate;
+                self.trading_state.insert(locate, m.trading_state);
+                // Any trading-state transition disarms the cross invariant:
+                // Nasdaq releases a stock for trading ("T") while the
+                // reopening cross is still being serialized, so the book may
+                // legitimately stay crossed for a moment after release. The
+                // invariant re-arms at the first uncrossed sighting below.
+                self.armed.remove(&locate);
+                self.refresh_armed(locate);
+                Effect::None
             }
             Message::AddOrder(m) => {
                 self.validate_new(m.order_ref, m.shares, m.price)?;
@@ -302,36 +364,36 @@ impl Market {
                     m.shares,
                     m.price,
                 );
-                Ok(Effect::Added {
+                Effect::Added {
                     order_ref: m.order_ref,
-                })
+                }
             }
             Message::OrderExecuted(m) => self.reduce(
                 m.header.stock_locate,
                 m.order_ref,
                 m.executed_shares,
                 Reduction::Execute,
-            ),
+            )?,
             Message::OrderExecutedWithPrice(m) => self.reduce(
                 m.header.stock_locate,
                 m.order_ref,
                 m.executed_shares,
                 Reduction::Execute,
-            ),
+            )?,
             Message::OrderCancel(m) => self.reduce(
                 m.header.stock_locate,
                 m.order_ref,
                 m.cancelled_shares,
                 Reduction::Cancel,
-            ),
+            )?,
             Message::OrderDelete(m) => {
                 let order = self.validate_live(m.header.stock_locate, m.order_ref)?;
                 let remaining = order.shares;
                 self.remove_order(m.order_ref);
-                Ok(Effect::Deleted {
+                Effect::Deleted {
                     order_ref: m.order_ref,
                     remaining,
-                })
+                }
             }
             Message::OrderReplace(m) => {
                 // Validate everything before touching state (atomicity).
@@ -349,16 +411,34 @@ impl Market {
                     m.shares,
                     m.price,
                 );
-                Ok(Effect::Replaced {
+                Effect::Replaced {
                     original: m.original_order_ref,
                     new: m.new_order_ref,
                     prior_remaining,
-                })
+                }
             }
             // Trades (P/Q/B) and informational messages do not change the
             // displayed book (spec §1.5: "Trade Messages do not affect the
             // book").
-            _ => Ok(Effect::None),
+            _ => Effect::None,
+        };
+        if effect != Effect::None {
+            // A book mutation may have uncrossed the book; re-arm eagerly so
+            // real crossings are caught from the next event onward.
+            self.refresh_armed(msg.header().stock_locate);
+        }
+        Ok(effect)
+    }
+
+    /// Arms the cross invariant for a locate the moment its book is seen
+    /// uncrossed while in continuous trading. Called after every event that
+    /// could change scope or book shape.
+    fn refresh_armed(&mut self, locate: u16) {
+        if self.market_hours
+            && self.trading_state(locate) == TradingState::Trading
+            && !self.crossed(locate)
+        {
+            self.armed.insert(locate);
         }
     }
 
@@ -547,11 +627,44 @@ impl Market {
             .unwrap_or(TradingState::Halted)
     }
 
-    /// True when the crossed-book invariant applies to this locate: the
-    /// system is in market hours and the security is trading. Outside of
-    /// this window (pre-open, halts) books legitimately cross.
+    /// True while the system is in market hours and the security is in the
+    /// Trading state. Outside this window (pre-open, halts) books
+    /// legitimately cross. Note that enforcement of the crossed-book
+    /// invariant additionally requires the locate to be *armed* — see
+    /// [`Self::cross_violation`].
     pub fn in_continuous_trading(&self, locate: u16) -> bool {
         self.market_hours && self.trading_state(locate) == TradingState::Trading
+    }
+
+    /// True if the locate's Stock Directory entry marked it a test
+    /// instrument (Authenticity "T", spec §1.2.1).
+    pub fn is_test_security(&self, locate: u16) -> bool {
+        self.test_securities.contains(&locate)
+    }
+
+    /// True when this locate's book violates the crossed-book invariant
+    /// right now: crossed while in continuous trading, on a production
+    /// (non-test) security, with the invariant armed (the book has been
+    /// seen uncrossed since the last trading-state transition, so the
+    /// reopening-cross serialization window is over).
+    pub fn cross_violation(&self, locate: u16) -> bool {
+        self.in_continuous_trading(locate)
+            && !self.is_test_security(locate)
+            && self.armed.contains(&locate)
+            && self.crossed(locate)
+    }
+
+    /// True when this locate is crossed in continuous trading but the
+    /// invariant has not re-armed since its last trading-state transition —
+    /// the legitimate transient state while Nasdaq serializes a reopening
+    /// cross around the "T" release action. It becomes a real violation
+    /// only if it persists: callers should report any locate still pending
+    /// when market hours end (see `Replay`).
+    pub fn cross_check_pending(&self, locate: u16) -> bool {
+        self.in_continuous_trading(locate)
+            && !self.is_test_security(locate)
+            && !self.armed.contains(&locate)
+            && self.crossed(locate)
     }
 
     /// True if the locate's book is crossed or locked (best bid >= best
