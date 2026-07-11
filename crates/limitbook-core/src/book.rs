@@ -434,10 +434,21 @@ impl Market {
     /// uncrossed while in continuous trading. Called after every event that
     /// could change scope or book shape.
     fn refresh_armed(&mut self, locate: u16) {
-        if self.market_hours
-            && self.trading_state(locate) == TradingState::Trading
-            && !self.crossed(locate)
-        {
+        // Nothing arms outside market hours; the bool check keeps the
+        // pre-open path as cheap as it always was.
+        if !self.market_hours {
+            return;
+        }
+        // Arming is monotonic between disarm events (only a trading-state
+        // transition or an end-of-hours system event removes entries), so an
+        // already-armed locate makes the rest a no-op. This early-out is the
+        // hot path: the 2019-12-30 flamegraph showed the unconditional
+        // trading-state + crossed lookups below eating 23% of the whole
+        // parse+book pass, almost all of it on locates already armed.
+        if self.armed.contains(&locate) {
+            return;
+        }
+        if self.trading_state(locate) == TradingState::Trading && !self.crossed(locate) {
             self.armed.insert(locate);
         }
     }

@@ -22,3 +22,18 @@ flate2 = "1"
 # Property-based tests: parser never panics, encode/decode round-trips,
 # random valid op sequences keep the book self-consistent.
 proptest = "1"
+# Micro-benchmarks (benches/): decode per message type, book operations
+# against a warm book, and whole-fixture parse / parse+book passes.
+criterion = "0.5"
+
+[[bench]]
+name = "parse"
+harness = false
+
+[[bench]]
+name = "book"
+harness = false
+
+[[bench]]
+name = "fixture"
+harness = false

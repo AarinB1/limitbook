@@ -8,7 +8,7 @@ use limitbook_core::frame::MIN_MESSAGE_LEN;
 use limitbook_core::parse::{EventCode, Price4, trim_padding};
 use limitbook_core::replay::{Replay, SymbolStats, Violation};
 
-use crate::{open_capture, read_exact_or_end, truncation_warning};
+use crate::{commas, open_capture, read_exact_or_end, truncation_warning};
 
 const USAGE: &str = "\
 Usage: limitbook replay --input <capture(.gz)> [--verify-every <N>]
@@ -94,19 +94,6 @@ pub fn replay(args: &[String]) -> Result<bool, String> {
         return Err(error);
     }
     Ok(engine.clean())
-}
-
-/// Groups digits by thousands: 94385 -> "94,385".
-fn commas(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// Fixed-point Price (4) as a decimal string, integer math only.

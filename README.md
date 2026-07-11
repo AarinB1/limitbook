@@ -11,4 +11,8 @@ Zero-copy NASDAQ ITCH 5.0 parser and limit order book reconstructor in Rust, wit
 
 ## Status
 
-Phase 0 (scaffolding + ground truth) complete. Next: zero-copy parser, order book reconstruction, throughput benchmarks, WASM browser demo.
+Phases 0–3 complete: zero-copy parser, order book reconstruction (the full
+268.7M-message sample day replays with zero invariant violations), and
+throughput benchmarks — see [BENCHMARKS.md](BENCHMARKS.md) for the
+measured rates, methodology, and flamegraphs. Next: queue-position
+tracking and the WASM browser demo.
