@@ -30,6 +30,10 @@ jobs:
         run: cargo test --workspace
 
       # limitbook-core must stay pure computation: no file/OS I/O and no
-      # dependencies that block a wasm32 target (it becomes a browser demo).
-      - name: Core builds for wasm32
-        run: cargo build -p limitbook-core --target wasm32-unknown-unknown
+      # dependencies that block a wasm32 target (it powers the browser demo).
+      # Building limitbook-wasm builds core as a dependency, and keeps the
+      # browser glue crate compiling for its actual target.
+      - name: Core + wasm glue build for wasm32
+        run: |
+          cargo build -p limitbook-core --target wasm32-unknown-unknown
+          cargo build -p limitbook-wasm --target wasm32-unknown-unknown
