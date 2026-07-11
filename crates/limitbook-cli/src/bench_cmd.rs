@@ -21,8 +21,8 @@
 
 use std::fs::{self, File};
 use std::hint::black_box;
-use std::io::{BufReader, BufWriter, Read};
-use std::time::Instant;
+use std::io::{BufReader, BufWriter, Read, Write};
+use std::time::{Instant, UNIX_EPOCH};
 
 use limitbook_core::book::Market;
 use limitbook_core::frame::{MIN_MESSAGE_LEN, Messages};
@@ -234,21 +234,37 @@ fn stream_replay(input: &str) -> Result<(Replay, f64), String> {
 }
 
 /// Returns the whole decompressed capture in memory, decompressing to a
-/// cache file next to the input first (reused when present).
+/// cache file next to the input first (reused when it matches the `.gz`).
 fn decompressed_bytes(input: &str) -> Result<Vec<u8>, String> {
     let raw_path = input
         .strip_suffix(".gz")
         .ok_or_else(|| format!("--input must be a .gz capture, got {input}"))?
         .to_string();
+    let meta_path = format!("{raw_path}.limitbook-cache");
+    let cache_key = gzip_cache_key(input)?;
     let cached = fs::metadata(&raw_path).map(|m| m.len()).unwrap_or(0);
-    if cached == 0 {
+    let valid_cache = cached != 0
+        && fs::read_to_string(&meta_path)
+            .map(|cached_key| cached_key == cache_key)
+            .unwrap_or(false);
+    if !valid_cache {
         let start = Instant::now();
         let gz = File::open(input).map_err(|e| format!("open {input}: {e}"))?;
         let mut decoder = flate2::bufread::GzDecoder::new(BufReader::with_capacity(1 << 20, gz));
-        let out = File::create(&raw_path).map_err(|e| format!("create {raw_path}: {e}"))?;
+        let tmp_path = format!("{raw_path}.{}.tmp", std::process::id());
+        let out = File::create(&tmp_path).map_err(|e| format!("create {tmp_path}: {e}"))?;
         let mut writer = BufWriter::with_capacity(1 << 20, out);
-        let bytes = std::io::copy(&mut decoder, &mut writer)
-            .map_err(|e| format!("decompress {input}: {e}"))?;
+        let bytes = std::io::copy(&mut decoder, &mut writer).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("decompress {input}: {e}")
+        })?;
+        writer
+            .flush()
+            .map_err(|e| format!("flush {tmp_path}: {e}"))?;
+        drop(writer);
+        fs::rename(&tmp_path, &raw_path)
+            .map_err(|e| format!("replace {raw_path} with {tmp_path}: {e}"))?;
+        fs::write(&meta_path, cache_key).map_err(|e| format!("write {meta_path}: {e}"))?;
         println!(
             "\ndecompressed {} bytes to {raw_path} in {:.1} s (cached for reruns)",
             commas(bytes),
@@ -269,6 +285,17 @@ fn decompressed_bytes(input: &str) -> Result<Vec<u8>, String> {
         start.elapsed().as_secs_f64()
     );
     Ok(buf)
+}
+
+fn gzip_cache_key(input: &str) -> Result<String, String> {
+    let meta = fs::metadata(input).map_err(|e| format!("stat {input}: {e}"))?;
+    let mtime = meta
+        .modified()
+        .map_err(|e| format!("stat mtime {input}: {e}"))?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("stat mtime {input}: {e}"))?
+        .as_nanos();
+    Ok(format!("gz_len={}\ngz_mtime_ns={mtime}\n", meta.len()))
 }
 
 /// Parse-only pass over in-memory bytes. The wrapping timestamp sum keeps
