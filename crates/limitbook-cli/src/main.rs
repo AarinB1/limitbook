@@ -8,6 +8,7 @@ use std::process::ExitCode;
 
 use limitbook_core::frame::MIN_MESSAGE_LEN;
 
+mod bench_cmd;
 mod replay_cmd;
 
 const USAGE: &str = "\
@@ -17,6 +18,8 @@ Commands:
   replay        Stream a capture through parse + order book and report
                 message counts, book activity, peak depth, and invariant
                 results. Exits nonzero on any violation.
+  bench         Measure whole-file throughput (end-to-end, parse-only,
+                parse + book), each number labeled with what it includes.
   make-fixture  Write a gzipped, symbol-filtered fixture from a capture.
 
 Run a command without options for its usage. Captures may be raw or
@@ -27,6 +30,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("make-fixture") => make_fixture(&args[1..]),
+        Some("bench") => bench_cmd::bench(&args[1..]),
         Some("replay") => {
             return match replay_cmd::replay(&args[1..]) {
                 Ok(true) => ExitCode::SUCCESS,
@@ -115,6 +119,19 @@ fn make_fixture(args: &[String]) -> Result<(), String> {
         eprintln!("  {} x {}", *ty as char, n);
     }
     Ok(())
+}
+
+/// Groups digits by thousands: 94385 -> "94,385".
+pub(crate) fn commas(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Opens a capture file, transparently gunzipping if it has the gzip magic.
