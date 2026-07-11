@@ -1,6 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["crates/limitbook-core", "crates/limitbook-cli"]
+members = [
+    "crates/limitbook-core",
+    "crates/limitbook-cli",
+    "crates/limitbook-wasm",
+]
 
 [workspace.package]
 version = "0.1.0"

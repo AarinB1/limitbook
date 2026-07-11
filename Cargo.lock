@@ -572,6 +572,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "limitbook-wasm"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "limitbook-core",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,20 @@
+[package]
+name = "limitbook-wasm"
+description = "wasm-bindgen glue exposing the limitbook-core replay engine to the browser demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# cdylib is the wasm module; rlib lets host-side `cargo test` link the same
+# glue code so the wasm-boundary API is tested against the fixture in CI.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+limitbook-core = { path = "../limitbook-core" }
+wasm-bindgen = "0.2.126"
+
+[dev-dependencies]
+# Host-side fixture test decompresses the checked-in capture.
+flate2 = "1"

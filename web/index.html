@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>limitbook — ITCH 5.0 order book in the browser (wasm)</title>
+<style>
+  :root {
+    --surface: #1a1a19;
+    --panel: #232322;
+    --ink: #e8e6e3;
+    --ink-muted: #9b9893;
+    --bid: #3987e5;
+    --ask: #e66767;
+    --good: #34a534;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface);
+    color: var(--ink);
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 17px; margin: 0 0 2px; font-weight: 600; }
+  .sub { color: var(--ink-muted); margin: 0 0 16px; font-size: 12.5px; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  button, select {
+    background: var(--panel); color: var(--ink);
+    border: 1px solid #3a3a38; border-radius: 6px;
+    font: inherit; padding: 6px 14px; cursor: pointer;
+  }
+  button:hover, select:hover { border-color: #55534f; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
+  .tile { background: var(--panel); border-radius: 8px; padding: 8px 12px; }
+  .tile .k { color: var(--ink-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+  .tile .v { font-size: 16px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  #verdict { margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: var(--panel); display: none; }
+  #verdict.pass { border-left: 3px solid var(--good); }
+  #verdict.fail { border-left: 3px solid var(--ask); }
+  canvas { width: 100%; background: var(--panel); border-radius: 10px; display: block; }
+  #status { color: var(--ink-muted); margin: 10px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>limitbook · NASDAQ TotalView-ITCH 5.0 replay</h1>
+  <p class="sub">The same no_std Rust engine the CLI runs, compiled to WebAssembly,
+    reconstructing the 2019-12-30 pre-market fixture live in your browser.</p>
+
+  <div class="controls">
+    <button id="playpause" disabled>Play</button>
+    <label>Symbol <select id="symbol" disabled></select></label>
+    <span id="status">Loading fixture…</span>
+  </div>
+
+  <div class="stats">
+    <div class="tile"><div class="k">Messages</div><div class="v" id="s-msgs">–</div></div>
+    <div class="tile"><div class="k">Engine msg/s (in wasm)</div><div class="v" id="s-engine-rate">–</div></div>
+    <div class="tile"><div class="k">Replay msg/s (paced)</div><div class="v" id="s-replay-rate">–</div></div>
+    <div class="tile"><div class="k">Best bid / ask</div><div class="v" id="s-quote">–</div></div>
+    <div class="tile"><div class="k">Spread</div><div class="v" id="s-spread">–</div></div>
+    <div class="tile"><div class="k">Live orders</div><div class="v" id="s-live">–</div></div>
+    <div class="tile"><div class="k">Violations</div><div class="v" id="s-viol">–</div></div>
+  </div>
+
+  <canvas id="ladder" width="1720" height="1040"></canvas>
+  <div id="verdict"></div>
+</main>
+<script type="module" src="main.js"></script>
+</body>
+</html>
