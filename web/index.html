@@ -12,7 +12,7 @@
       content="Zero-copy ITCH 5.0 parsing and limit-order-book reconstruction in
                no_std Rust, compiled to WebAssembly. 268.7M messages validated;
                browser-vs-CLI parity enforced by CI.">
-<meta name="theme-color" content="#0d0b08">
+<meta name="theme-color" content="#f3eee2">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d0b08'/%3E%3Crect x='3' y='8' width='4' height='2' fill='%232f9d72'/%3E%3Crect x='2' y='11' width='5' height='2' fill='%232f9d72'/%3E%3Crect x='9' y='8' width='3' height='2' fill='%23c0524e'/%3E%3Crect x='9' y='5' width='5' height='2' fill='%23c0524e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,13 +20,25 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..640;1,9..144,400..640&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <style>
   /* ---- design tokens ---------------------------------------------------
-     Warm-dark system: the dark inversion of aarinbasu.com's cream-paper
-     palette, so the two sites read as one hand. Base is a warm near-black,
-     text is the portfolio's paper color, accent is its rust/terracotta.
-     Mark colors (bid/ask/accent) hold CVD separation and ≥3:1 on --surface;
-     the *-ink variants are the lighter text steps for small type. main.js
-     reads --mono and the mark/ink tokens by name — keep the names stable. */
+     Split theme. The PAGE is light — aarinbasu.com's cream-paper palette,
+     so the two sites read as one hand — via the --pg-* namespace below.
+     The DEMO WINDOW stays dark: the unprefixed set is the terminal's
+     theme, and it must remain defined on :root because main.js reads
+     --mono and the mark/ink tokens off the root element by name for the
+     canvas renderers — keep the names AND the dark values stable. Page
+     chrome must only ever use --pg-* tokens; everything inside .window
+     uses the unprefixed dark set. */
   :root {
+    /* page (light) */
+    --pg-bg: #f3eee2;
+    --pg-surface: #faf6ec;
+    --pg-ink: #2e2921;
+    --pg-ink-2: #6b6353;
+    --pg-ink-3: #99907d;
+    --pg-edge: #ded5c0;
+    --pg-edge-2: #c8bea6;
+    --pg-live: #4f8a58;
+    /* demo window (dark) — read by main.js, do not rename or lighten */
     --bg: #0d0b08;
     --surface: #14110c;      /* window body */
     --surface-2: #1a1610;    /* panels within the window */
@@ -47,19 +59,19 @@
             "Helvetica Neue", Arial, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
             Consolas, "Liberation Mono", monospace;
-    /* depth: one recipe, used by every floated element */
+    /* depth: a dark window lifted off the light page */
     --shadow-window:
       inset 0 1px 0 rgba(255, 255, 255, .05),
-      0 1px 2px rgba(0, 0, 0, .5),
-      0 24px 48px -16px rgba(0, 0, 0, .6),
-      0 72px 140px -40px rgba(0, 0, 0, .7);
+      0 1px 2px rgba(62, 50, 32, .22),
+      0 24px 48px -16px rgba(62, 50, 32, .3),
+      0 80px 160px -40px rgba(62, 50, 32, .38);
   }
   * { box-sizing: border-box; }
-  html { scroll-padding-top: 24px; background: var(--bg); }
+  html { scroll-padding-top: 24px; background: var(--pg-bg); }
   html, body { margin: 0; }
   body {
-    background: var(--bg);
-    color: var(--ink);
+    background: var(--pg-bg);
+    color: var(--pg-ink);
     font: 400 16px/1.65 var(--sans);
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
@@ -68,38 +80,40 @@
      nothing shifts as the book ticks. */
   code, kbd, .num, .mono { font-family: var(--mono); }
   body { font-variant-numeric: tabular-nums; }
-  a { color: var(--ink-2); text-decoration-color: var(--edge-2); text-underline-offset: 3px; }
-  a:hover { color: var(--ink); }
-  ::selection { background: rgba(193, 72, 31, .35); }
-  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  a { color: var(--pg-ink-2); text-decoration-color: var(--pg-edge-2); text-underline-offset: 3px; }
+  a:hover { color: var(--pg-ink); }
+  ::selection { background: rgba(193, 72, 31, .25); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   code {
-    background: var(--surface); border: 1px solid var(--edge);
+    background: var(--pg-surface); border: 1px solid var(--pg-edge);
     border-radius: 5px; padding: .08em .35em; font-size: .85em;
   }
 
   .wrap { max-width: 1200px; margin: 0 auto; padding: 0 28px; position: relative; }
   .microlabel {
-    color: var(--ink-2); font: 600 10.5px/1.4 var(--mono);
+    color: var(--pg-ink-2); font: 600 10.5px/1.4 var(--mono);
     text-transform: uppercase; letter-spacing: .14em;
   }
+  .window .microlabel { color: var(--ink-2); }
 
   /* ---- atmosphere ------------------------------------------------------
-     The page is not one flat plane: a rust field warms the headline corner,
-     a faint cool wash lifts the right, and a film-grain layer sits over
-     everything so the darks have tooth instead of dead #000 flatness. */
+     The page is not one flat plane: soft warm washes tint the paper field,
+     and a grain layer sits BEHIND the content (z-index below .wrap) so it
+     reads as paper texture on the page while the demo window — an opaque
+     surface above it — stays perfectly crisp for the mono figures. */
   .atmo {
     position: absolute; inset: 0 0 auto 0; height: 1080px;
     background:
-      radial-gradient(ellipse 56% 42% at 14% 4%, rgba(193, 72, 31, .13), transparent 68%),
-      radial-gradient(ellipse 44% 30% at 88% 12%, rgba(236, 230, 216, .05), transparent 62%),
-      radial-gradient(ellipse 80% 40% at 50% 46%, rgba(193, 72, 31, .05), transparent 70%);
+      radial-gradient(ellipse 56% 42% at 12% 0%, rgba(193, 72, 31, .07), transparent 65%),
+      radial-gradient(ellipse 50% 36% at 92% 14%, rgba(222, 148, 90, .12), transparent 62%);
     pointer-events: none;
   }
   .grain {
-    position: fixed; inset: 0; z-index: 40; pointer-events: none;
-    opacity: .05;
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    opacity: .05; mix-blend-mode: multiply;
     background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
   }
+  .wrap { z-index: 1; }
 
   /* ---- top bar --------------------------------------------------------- */
   .top {
@@ -108,16 +122,16 @@
     padding: 30px 0 0;
   }
   .wordmark {
-    font: 700 15px var(--mono); letter-spacing: .18em; color: var(--ink);
+    font: 700 15px var(--mono); letter-spacing: .18em; color: var(--pg-ink);
     text-decoration: none;
   }
-  .wordmark .tick { color: var(--accent-ink); }
+  .wordmark .tick { color: var(--accent); }
   .top nav { display: flex; gap: 30px; }
   .top nav a {
     font: 500 12px var(--mono); letter-spacing: .08em;
-    color: var(--ink-2); text-decoration: none;
+    color: var(--pg-ink-2); text-decoration: none;
   }
-  .top nav a:hover { color: var(--ink); }
+  .top nav a:hover { color: var(--pg-ink); }
 
   /* ---- hero --------------------------------------------------------------
      Asymmetric band: editorial serif headline left, the live engine-
@@ -131,13 +145,17 @@
   .eyebrow {
     display: flex; align-items: center; gap: 10px; margin: 0;
     font: 500 11px var(--mono); letter-spacing: .18em;
-    text-transform: uppercase; color: var(--ink-2);
+    text-transform: uppercase; color: var(--pg-ink-2);
   }
   .live-dot {
     width: 6px; height: 6px; border-radius: 50%;
-    background: var(--bid-ink); flex: none;
-    box-shadow: 0 0 8px rgba(87, 196, 143, .8);
+    background: var(--pg-live); flex: none;
+    box-shadow: 0 0 8px rgba(79, 138, 88, .55);
     animation: pulse 2.4s ease-in-out infinite;
+  }
+  .window .live-dot {
+    background: var(--bid-ink);
+    box-shadow: 0 0 8px rgba(87, 196, 143, .8);
   }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
   .hero h1 {
@@ -148,32 +166,35 @@
     font-optical-sizing: auto;
   }
   @media (max-width: 720px) { .hero h1 br { display: none; } }
-  .hero h1 em { font-style: italic; font-weight: 440; color: var(--accent-ink); }
+  .hero h1 em { font-style: italic; font-weight: 440; color: var(--accent); }
   .hero .lede {
     margin: 26px 0 0; max-width: 54ch;
-    color: var(--ink-2); font-size: 16.5px; line-height: 1.7;
+    color: var(--pg-ink-2); font-size: 16.5px; line-height: 1.7;
   }
   .hero .lede code { white-space: nowrap; }
 
-  /* The flex: a live throughput figure measured in this tab, set huge. */
-  .hero-meter { text-align: right; padding-bottom: 8px; }
+  /* The flex: a live throughput figure measured in this tab, set huge.
+     A hairline rule ties it to the layout grid so it reads as placed. */
+  .hero-meter {
+    min-width: 300px; padding: 20px 0 8px;
+    border-top: 1px solid var(--pg-edge-2);
+  }
   .hero-meter .num {
     display: block; margin-top: 14px;
     font-size: clamp(40px, 4.6vw, 64px); font-weight: 600; line-height: 1;
-    letter-spacing: -0.045em; color: var(--ink);
+    letter-spacing: -0.045em; color: var(--pg-ink);
   }
   .hero-meter .num small {
-    font-size: 15px; font-weight: 500; letter-spacing: 0; color: var(--ink-3);
+    font-size: 15px; font-weight: 500; letter-spacing: 0; color: var(--pg-ink-3);
   }
   .hero-meter .meter-note {
-    margin: 12px 0 0 auto; max-width: 30ch;
-    font: 400 11px/1.7 var(--mono); color: var(--ink-3);
+    margin: 12px 0 0; max-width: 30ch;
+    font: 400 11px/1.7 var(--mono); color: var(--pg-ink-3);
   }
   @media (max-width: 960px) {
     .hero { padding-top: 64px; }
     .hero-grid { grid-template-columns: 1fr; }
-    .hero-meter { text-align: left; padding-bottom: 0; }
-    .hero-meter .meter-note { margin-left: 0; }
+    .hero-meter { padding-bottom: 0; min-width: 0; }
   }
 
   /* ---- the stage: a real application window ------------------------------ */
@@ -182,7 +203,7 @@
   .stage::before {
     content: ""; position: absolute; inset: 10px -6vw auto;
     height: 420px; z-index: 0;
-    background-image: radial-gradient(rgba(236, 230, 216, .07) 1px, transparent 1.5px);
+    background-image: radial-gradient(rgba(62, 50, 32, .18) 1px, transparent 1.5px);
     background-size: 26px 26px;
     -webkit-mask-image: radial-gradient(ellipse 68% 100% at 50% 0%, #000 20%, transparent 72%);
     mask-image: radial-gradient(ellipse 68% 100% at 50% 0%, #000 20%, transparent 72%);
@@ -191,6 +212,7 @@
   .window {
     position: relative; z-index: 1;
     margin-inline: clamp(-40px, -3vw, 0px);
+    color: var(--ink); /* the dark context's base ink — the page's is dark */
     background: var(--surface); border: 1px solid var(--edge);
     border-radius: 14px; overflow: hidden;
     box-shadow: var(--shadow-window);
@@ -375,11 +397,11 @@
   }
   .stage-caption {
     display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    margin: 16px 4px 0; color: var(--ink-3);
+    margin: 16px 4px 0; color: var(--pg-ink-3);
     font: 400 12px/1.6 var(--mono);
   }
   kbd {
-    background: var(--surface); border: 1px solid var(--edge);
+    background: var(--pg-surface); border: 1px solid var(--pg-edge);
     border-radius: 4px; padding: 0 5px; font: inherit; font-size: 10.5px;
   }
 
@@ -387,14 +409,14 @@
      (Composition pass pending review of the hero — these currently inherit
      the token system: serif display, warm palette.) */
   section.prose { position: relative; padding: 116px 0 0; }
-  .kicker { margin: 0 0 16px; color: var(--accent-ink); }
+  .kicker { margin: 0 0 16px; color: var(--accent); }
   section.prose h2 {
     margin: 0; font-family: var(--serif); font-weight: 480;
     font-size: clamp(30px, 3.6vw, 46px); letter-spacing: -0.012em;
     line-height: 1.12; font-optical-sizing: auto;
   }
   section.prose .section-lede {
-    margin: 18px 0 0; max-width: 60ch; color: var(--ink-2); font-size: 16.5px;
+    margin: 18px 0 0; max-width: 60ch; color: var(--pg-ink-2); font-size: 16.5px;
   }
 
   /* ---- how it works ------------------------------------------------------------- */
@@ -404,60 +426,60 @@
   }
   @media (max-width: 880px) { .steps { grid-template-columns: 1fr; } }
   .step {
-    position: relative; background: var(--surface); border: 1px solid var(--edge);
+    position: relative; background: var(--pg-surface); border: 1px solid var(--pg-edge);
     border-radius: 12px; padding: 22px 22px 24px;
   }
   .step .n {
-    font: 700 12px var(--mono); letter-spacing: .14em; color: var(--accent-ink);
+    font: 700 12px var(--mono); letter-spacing: .14em; color: var(--accent);
   }
   .step h3 { margin: 12px 0 8px; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
-  .step p { margin: 0; color: var(--ink-2); font-size: 14.5px; line-height: 1.65; }
+  .step p { margin: 0; color: var(--pg-ink-2); font-size: 14.5px; line-height: 1.65; }
   .step .n::after {
     content: ""; display: inline-block; width: 34px; height: 1px;
-    background: var(--edge-2); margin: 0 0 3px 10px;
+    background: var(--pg-edge-2); margin: 0 0 3px 10px;
   }
 
   /* ---- credibility band ------------------------------------------------------------ */
   .cred-band {
-    margin-top: 44px; border-top: 1px solid var(--edge);
-    border-bottom: 1px solid var(--edge);
+    margin-top: 44px; border-top: 1px solid var(--pg-edge);
+    border-bottom: 1px solid var(--pg-edge);
     display: grid; grid-template-columns: repeat(3, 1fr);
   }
   @media (max-width: 880px) { .cred-band { grid-template-columns: 1fr; } }
-  .stat { padding: 34px 30px 36px; border-left: 1px solid var(--edge); }
+  .stat { padding: 34px 30px 36px; border-left: 1px solid var(--pg-edge); }
   .stat:first-child { border-left: none; padding-left: 4px; }
   @media (max-width: 880px) {
-    .stat { border-left: none; border-top: 1px solid var(--edge); padding: 26px 4px; }
+    .stat { border-left: none; border-top: 1px solid var(--pg-edge); padding: 26px 4px; }
     .stat:first-child { border-top: none; }
   }
   .stat .num {
     font-size: clamp(34px, 4vw, 44px); font-weight: 700; line-height: 1.05;
     letter-spacing: -0.01em;
   }
-  .stat .num small { font-size: .48em; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+  .stat .num small { font-size: .48em; font-weight: 500; color: var(--pg-ink-2); letter-spacing: 0; }
   .stat .label { margin-top: 10px; }
-  .stat p { margin: 12px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.65; }
-  .cred-note { margin: 18px 4px 0; color: var(--ink-3); font-size: 13px; }
-  .cred-note a { color: var(--ink-2); }
+  .stat p { margin: 12px 0 0; color: var(--pg-ink-2); font-size: 14px; line-height: 1.65; }
+  .cred-note { margin: 18px 4px 0; color: var(--pg-ink-3); font-size: 13px; }
+  .cred-note a { color: var(--pg-ink-2); }
 
   /* ---- footer -------------------------------------------------------------------------- */
   footer {
-    margin-top: 120px; border-top: 1px solid var(--edge);
+    margin-top: 120px; border-top: 1px solid var(--pg-edge);
     padding: 34px 0 46px;
   }
   .foot {
     display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
     align-items: flex-start;
   }
-  .foot .col p { margin: 8px 0 0; color: var(--ink-3); font-size: 13px; max-width: 46ch; }
+  .foot .col p { margin: 8px 0 0; color: var(--pg-ink-3); font-size: 13px; max-width: 46ch; }
   .foot nav { display: flex; gap: 28px; flex-wrap: wrap; }
   .foot nav a {
-    display: block; font-size: 13.5px; color: var(--ink-2); text-decoration: none;
+    display: block; font-size: 13.5px; color: var(--pg-ink-2); text-decoration: none;
     line-height: 2;
   }
-  .foot nav a:hover { color: var(--ink); }
+  .foot nav a:hover { color: var(--pg-ink); }
   .foot .navlabel { margin-bottom: 4px; }
-  .legal { margin-top: 30px; color: var(--ink-3); font-size: 12px; max-width: 88ch; }
+  .legal { margin-top: 30px; color: var(--pg-ink-3); font-size: 12px; max-width: 88ch; }
 
   @media (max-width: 560px) {
     .top nav { gap: 18px; }
@@ -492,7 +514,7 @@
       <div class="hero-copy">
         <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>
           Nasdaq TotalView&#8209;ITCH 5.0 &middot; 2019&#8209;12&#8209;30 &middot; 12:00&ndash;12:20 ET</p>
-        <h1>Real Nasdaq depth,<br><em>rebuilt live</em> in<br>your browser.</h1>
+        <h1>Real Nasdaq depth,<br><em>rebuilt live</em><br>in your browser.</h1>
         <p class="lede">
           limitbook is a <code>no_std</code> Rust ITCH&nbsp;5.0 engine, compiled to
           WebAssembly &mdash; parsing the raw exchange feed zero&#8209;copy and
