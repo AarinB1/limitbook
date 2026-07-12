@@ -251,7 +251,11 @@ async function main() {
   scrubber.addEventListener("pointerup", () => (scrubbing = false));
 
   function seekTo(target) {
-    if (target < engine.messages()) freshEngine(false);
+    const rebuilt = target < engine.messages();
+    if (rebuilt) {
+      freshEngine(false);
+      resetLadderState();
+    }
     // Drop mid-price history past the new position, then fast-forward in
     // chunks, sampling as we go so the chart shows the path just skipped.
     for (const arr of spark.values()) {
@@ -266,7 +270,6 @@ async function main() {
     sampleSpark();
     simClock = engine.clock_ns();
     lastFrame = performance.now();
-    resetLadderState();
     if (engine.done()) onDone();
     else {
       finishedOnce = false;
