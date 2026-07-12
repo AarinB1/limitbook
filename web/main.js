@@ -161,7 +161,7 @@ async function main() {
   let sparkLastSample = -Infinity;
   let tapeDirty = true;
 
-  function freshEngine() {
+  function freshEngine(withPrime = true) {
     engine?.free();
     engine = new Engine(bytes, VERIFY_EVERY);
     for (const arr of tape.values()) arr.length = 0;
@@ -170,7 +170,7 @@ async function main() {
     tapeDirty = true;
     $("verdict").style.display = "none";
     delete window.__limitbook_verdict;
-    prime();
+    if (withPrime) prime();
   }
 
   freshEngine();
@@ -250,7 +250,7 @@ async function main() {
   scrubber.addEventListener("pointerup", () => (scrubbing = false));
 
   function seekTo(target) {
-    if (target < engine.messages()) freshEngine();
+    if (target < engine.messages()) freshEngine(false);
     // Drop mid-price history past the new position, then fast-forward in
     // chunks, sampling as we go so the chart shows the path just skipped.
     for (const arr of spark.values()) {
