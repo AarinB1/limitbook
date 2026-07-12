@@ -401,10 +401,11 @@ async function main() {
 
         // Depth bar from the center outward, rounded outer end + solid cap.
         // The length eases toward its target so updates read as movement,
-        // not repaints; new levels grow in from the center line.
+        // not repaints; new levels grow in from the center line unless motion is reduced.
         const target = Math.min(barMax, Math.max(2, (shares / smoothMax) * barMax));
         const shown = barLen.get(key);
-        const len = shown === undefined ? 2 : shown + (target - shown) * EASE;
+        const initialLen = EASE === 1 ? target : 2;
+        const len = shown === undefined ? initialLen : shown + (target - shown) * EASE;
         barLen.set(key, len);
         const xInner = mid + dir * barInner;
         const xOuter = xInner + dir * len;
