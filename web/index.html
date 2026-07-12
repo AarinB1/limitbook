@@ -12,40 +12,50 @@
       content="Zero-copy ITCH 5.0 parsing and limit-order-book reconstruction in
                no_std Rust, compiled to WebAssembly. 268.7M messages validated;
                browser-vs-CLI parity enforced by CI.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230a0c10'/%3E%3Crect x='3' y='8' width='4' height='2' fill='%232e9e78'/%3E%3Crect x='2' y='11' width='5' height='2' fill='%232e9e78'/%3E%3Crect x='9' y='8' width='3' height='2' fill='%23c05b5b'/%3E%3Crect x='9' y='5' width='5' height='2' fill='%23c05b5b'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#0d0b08">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230d0b08'/%3E%3Crect x='3' y='8' width='4' height='2' fill='%232f9d72'/%3E%3Crect x='2' y='11' width='5' height='2' fill='%232f9d72'/%3E%3Crect x='9' y='8' width='3' height='2' fill='%23c0524e'/%3E%3Crect x='9' y='5' width='5' height='2' fill='%23c0524e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..640;1,9..144,400..640&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <style>
   /* ---- design tokens ---------------------------------------------------
-     Mark colors (bid/ask/accent) validated against --surface for lightness
-     band, chroma, CVD separation (ΔE ≥ 15) and ≥3:1 contrast; the *-ink
-     variants are the lighter text steps (≥7:1 WCAG on --surface). main.js
+     Warm-dark system: the dark inversion of aarinbasu.com's cream-paper
+     palette, so the two sites read as one hand. Base is a warm near-black,
+     text is the portfolio's paper color, accent is its rust/terracotta.
+     Mark colors (bid/ask/accent) hold CVD separation and ≥3:1 on --surface;
+     the *-ink variants are the lighter text steps for small type. main.js
      reads --mono and the mark/ink tokens by name — keep the names stable. */
   :root {
-    --bg: #0a0c10;
-    --surface: #11141a;
-    --surface-2: #171b22;
-    --edge: #242a34;
-    --edge-2: #313949;
-    --ink: #e8ebf1;
-    --ink-2: #9aa2b1;
-    --ink-3: #636c7b;
-    --bid: #2e9e78;
-    --ask: #c05b5b;
-    --bid-ink: #56c493;
-    --ask-ink: #e39a94;
-    --accent: #bc862c;
-    --accent-ink: #e5b25c;
-    --flash: #f2f4f8;
+    --bg: #0d0b08;
+    --surface: #14110c;      /* window body */
+    --surface-2: #1a1610;    /* panels within the window */
+    --edge: #2a241a;
+    --edge-2: #3d3527;
+    --ink: #ece6d8;          /* portfolio paper, used as ink */
+    --ink-2: #a89f8c;
+    --ink-3: #6f6757;
+    --bid: #2f9d72;
+    --ask: #c0524e;
+    --bid-ink: #57c48f;
+    --ask-ink: #e2938a;
+    --accent: #c1481f;       /* portfolio rust */
+    --accent-ink: #e87040;
+    --flash: #f6f0e2;
+    --serif: "Fraunces", "Iowan Old Style", Georgia, serif;
     --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
             "Helvetica Neue", Arial, sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
             Consolas, "Liberation Mono", monospace;
+    /* depth: one recipe, used by every floated element */
+    --shadow-window:
+      inset 0 1px 0 rgba(255, 255, 255, .05),
+      0 1px 2px rgba(0, 0, 0, .5),
+      0 24px 48px -16px rgba(0, 0, 0, .6),
+      0 72px 140px -40px rgba(0, 0, 0, .7);
   }
   * { box-sizing: border-box; }
-  html { scroll-padding-top: 24px; }
+  html { scroll-padding-top: 24px; background: var(--bg); }
   html, body { margin: 0; }
   body {
     background: var(--bg);
@@ -60,97 +70,153 @@
   body { font-variant-numeric: tabular-nums; }
   a { color: var(--ink-2); text-decoration-color: var(--edge-2); text-underline-offset: 3px; }
   a:hover { color: var(--ink); }
-  ::selection { background: rgba(188, 134, 44, .30); }
+  ::selection { background: rgba(193, 72, 31, .35); }
   :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
   code {
     background: var(--surface); border: 1px solid var(--edge);
     border-radius: 5px; padding: .08em .35em; font-size: .85em;
   }
 
-  .wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 28px; position: relative; }
   .microlabel {
     color: var(--ink-2); font: 600 10.5px/1.4 var(--mono);
     text-transform: uppercase; letter-spacing: .14em;
   }
 
-  /* Faint amber field behind the hero — temperature, not decoration. */
-  .glow {
-    position: absolute; inset: 0 0 auto 0; height: 620px;
+  /* ---- atmosphere ------------------------------------------------------
+     The page is not one flat plane: a rust field warms the headline corner,
+     a faint cool wash lifts the right, and a film-grain layer sits over
+     everything so the darks have tooth instead of dead #000 flatness. */
+  .atmo {
+    position: absolute; inset: 0 0 auto 0; height: 1080px;
     background:
-      radial-gradient(ellipse 90% 65% at 50% -12%, rgba(188, 134, 44, .10), transparent 70%);
+      radial-gradient(ellipse 56% 42% at 14% 4%, rgba(193, 72, 31, .13), transparent 68%),
+      radial-gradient(ellipse 44% 30% at 88% 12%, rgba(236, 230, 216, .05), transparent 62%),
+      radial-gradient(ellipse 80% 40% at 50% 46%, rgba(193, 72, 31, .05), transparent 70%);
     pointer-events: none;
+  }
+  .grain {
+    position: fixed; inset: 0; z-index: 40; pointer-events: none;
+    opacity: .05;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
   /* ---- top bar --------------------------------------------------------- */
   .top {
     position: relative;
     display: flex; align-items: center; justify-content: space-between;
-    padding: 26px 0 0;
+    padding: 30px 0 0;
   }
   .wordmark {
     font: 700 15px var(--mono); letter-spacing: .18em; color: var(--ink);
     text-decoration: none;
   }
   .wordmark .tick { color: var(--accent-ink); }
-  .top nav { display: flex; gap: 26px; }
+  .top nav { display: flex; gap: 30px; }
   .top nav a {
-    font: 500 13px var(--sans); letter-spacing: .02em;
+    font: 500 12px var(--mono); letter-spacing: .08em;
     color: var(--ink-2); text-decoration: none;
   }
   .top nav a:hover { color: var(--ink); }
 
-  /* ---- hero -------------------------------------------------------------- */
-  .hero { position: relative; text-align: center; padding: 88px 0 44px; }
-  .hero .eyebrow {
-    display: inline-flex; align-items: center; gap: 9px;
-    margin: 0 0 26px;
-    font: 500 11.5px var(--mono); letter-spacing: .16em;
+  /* ---- hero --------------------------------------------------------------
+     Asymmetric band: editorial serif headline left, the live engine-
+     throughput meter right, both sitting on the baseline. The terminal
+     window follows immediately — already running. */
+  .hero { position: relative; padding: 68px 0 0; }
+  .hero-grid {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: 24px 56px; align-items: end;
+  }
+  .eyebrow {
+    display: flex; align-items: center; gap: 10px; margin: 0;
+    font: 500 11px var(--mono); letter-spacing: .18em;
     text-transform: uppercase; color: var(--ink-2);
-    border: 1px solid var(--edge); border-radius: 999px;
-    padding: 7px 15px; background: rgba(17, 20, 26, .6);
   }
   .live-dot {
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--bid-ink); flex: none;
+    box-shadow: 0 0 8px rgba(87, 196, 143, .8);
     animation: pulse 2.4s ease-in-out infinite;
   }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
   .hero h1 {
-    margin: 0 auto;
-    font-size: clamp(34px, 5.4vw, 58px); font-weight: 650; line-height: 1.08;
-    letter-spacing: -0.022em;
+    margin: 22px 0 0;
+    font-family: var(--serif); font-weight: 480;
+    font-size: clamp(40px, 5.1vw, 76px); line-height: 1.04;
+    letter-spacing: -0.015em;
+    font-optical-sizing: auto;
   }
   @media (max-width: 720px) { .hero h1 br { display: none; } }
-  .hero h1 em { font-style: normal; color: var(--accent-ink); }
+  .hero h1 em { font-style: italic; font-weight: 440; color: var(--accent-ink); }
   .hero .lede {
-    margin: 22px auto 0; max-width: 62ch;
-    color: var(--ink-2); font-size: 17px; line-height: 1.7;
+    margin: 26px 0 0; max-width: 54ch;
+    color: var(--ink-2); font-size: 16.5px; line-height: 1.7;
   }
   .hero .lede code { white-space: nowrap; }
 
-  /* ---- terminal (the centerpiece) --------------------------------------- */
-  .stage { position: relative; padding: 28px 0 0; }
-  .terminal {
+  /* The flex: a live throughput figure measured in this tab, set huge. */
+  .hero-meter { text-align: right; padding-bottom: 8px; }
+  .hero-meter .num {
+    display: block; margin-top: 14px;
+    font-size: clamp(40px, 4.6vw, 64px); font-weight: 600; line-height: 1;
+    letter-spacing: -0.045em; color: var(--ink);
+  }
+  .hero-meter .num small {
+    font-size: 15px; font-weight: 500; letter-spacing: 0; color: var(--ink-3);
+  }
+  .hero-meter .meter-note {
+    margin: 12px 0 0 auto; max-width: 30ch;
+    font: 400 11px/1.7 var(--mono); color: var(--ink-3);
+  }
+  @media (max-width: 960px) {
+    .hero { padding-top: 64px; }
+    .hero-grid { grid-template-columns: 1fr; }
+    .hero-meter { text-align: left; padding-bottom: 0; }
+    .hero-meter .meter-note { margin-left: 0; }
+  }
+
+  /* ---- the stage: a real application window ------------------------------ */
+  .stage { position: relative; padding: 44px 0 0; }
+  /* dot-grid pedestal the window floats over */
+  .stage::before {
+    content: ""; position: absolute; inset: 10px -6vw auto;
+    height: 420px; z-index: 0;
+    background-image: radial-gradient(rgba(236, 230, 216, .07) 1px, transparent 1.5px);
+    background-size: 26px 26px;
+    -webkit-mask-image: radial-gradient(ellipse 68% 100% at 50% 0%, #000 20%, transparent 72%);
+    mask-image: radial-gradient(ellipse 68% 100% at 50% 0%, #000 20%, transparent 72%);
+    pointer-events: none;
+  }
+  .window {
+    position: relative; z-index: 1;
+    margin-inline: clamp(-40px, -3vw, 0px);
     background: var(--surface); border: 1px solid var(--edge);
     border-radius: 14px; overflow: hidden;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset,
-                0 24px 70px -32px rgba(0, 0, 0, .85);
+    box-shadow: var(--shadow-window);
     font: 400 13px/1.5 var(--mono);
   }
-  .term-head {
-    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  .titlebar {
+    display: flex; align-items: center; gap: 16px;
     padding: 13px 18px; border-bottom: 1px solid var(--edge);
-    background: var(--surface-2);
+    background: linear-gradient(180deg, #1d1913, var(--surface-2));
   }
-  .term-title { font: 700 12px var(--mono); letter-spacing: .16em; }
-  .term-title .live-dot { display: inline-block; margin-right: 8px; vertical-align: 1px; }
-  .term-sub { color: var(--ink-3); font-size: 11.5px; letter-spacing: .04em; }
-  .term-rate { margin-left: auto; text-align: right; }
-  .term-rate .num {
-    display: block; font-size: 21px; font-weight: 700; line-height: 1.15;
-    color: var(--ink);
+  .traffic { display: flex; gap: 7px; flex: none; }
+  .traffic span {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #37301f; border: 1px solid rgba(255, 255, 255, .06);
   }
-  .term-rate .num small { font-size: 12px; font-weight: 400; color: var(--ink-2); }
+  .win-title {
+    display: flex; align-items: center; gap: 9px; min-width: 0;
+    font: 600 11.5px var(--mono); letter-spacing: .1em; color: var(--ink-2);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .win-title b { color: var(--ink); font-weight: 700; }
+  .win-right {
+    margin-left: auto; color: var(--ink-3); font-size: 11px;
+    letter-spacing: .06em; white-space: nowrap;
+  }
+  @media (max-width: 720px) { .win-right { display: none; } }
   .term-body { padding: 14px 14px 0; }
 
   /* ---- transport ------------------------------------------------------ */
@@ -163,11 +229,18 @@
     background: var(--surface); color: var(--ink);
     border: 1px solid var(--edge); border-radius: 7px;
     font: 600 12.5px var(--mono); padding: 7px 14px; cursor: pointer;
-    transition: border-color .15s ease, background-color .15s ease;
+    transition: border-color .15s ease, background-color .15s ease,
+                filter .15s ease;
   }
   button:hover { border-color: var(--edge-2); }
   button:disabled { opacity: .45; cursor: default; }
-  #playpause { min-width: 92px; }
+  /* primary control = the portfolio's rust button */
+  #playpause {
+    min-width: 96px; background: var(--accent);
+    border-color: color-mix(in srgb, var(--accent), #fff 14%);
+    color: #f6efe4;
+  }
+  #playpause:hover { filter: brightness(1.12); }
   .seg { display: flex; }
   .seg button {
     border-radius: 0; border-right-width: 0; padding: 7px 11px;
@@ -177,7 +250,7 @@
   .seg button:last-child { border-radius: 0 7px 7px 0; border-right-width: 1px; }
   .seg button[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent);
-    color: #0a0c10; font-weight: 700;
+    color: #f6efe4; font-weight: 700;
   }
   .scrub { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 220px; }
   input[type="range"] {
@@ -187,7 +260,7 @@
   input[type="range"]::-webkit-slider-runnable-track {
     height: 4px; border-radius: 2px;
     background: linear-gradient(to right,
-      var(--accent) var(--progress, 0%), var(--surface-2) var(--progress, 0%));
+      var(--accent-ink) var(--progress, 0%), var(--surface-2) var(--progress, 0%));
     border: 1px solid var(--edge);
   }
   input[type="range"]::-webkit-slider-thumb {
@@ -201,7 +274,7 @@
     border: 1px solid var(--edge);
   }
   input[type="range"]::-moz-range-progress {
-    height: 4px; border-radius: 2px; background: var(--accent);
+    height: 4px; border-radius: 2px; background: var(--accent-ink);
   }
   input[type="range"]::-moz-range-thumb {
     width: 12px; height: 12px; border-radius: 50%;
@@ -270,7 +343,7 @@
   #tape .row.dn .a { color: var(--ask-ink); }
   #tape .row:first-child { background: var(--surface); }
 
-  /* ---- session strip (inside the terminal) --------------------------------- */
+  /* ---- session strip (inside the window) --------------------------------- */
   .strip {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 8px; margin-bottom: 12px;
@@ -302,7 +375,7 @@
   }
   .stage-caption {
     display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    margin: 14px 4px 0; color: var(--ink-3);
+    margin: 16px 4px 0; color: var(--ink-3);
     font: 400 12px/1.6 var(--mono);
   }
   kbd {
@@ -310,15 +383,18 @@
     border-radius: 4px; padding: 0 5px; font: inherit; font-size: 10.5px;
   }
 
-  /* ---- prose sections --------------------------------------------------------- */
-  section.prose { position: relative; padding: 108px 0 0; }
-  .kicker { margin: 0 0 14px; color: var(--accent-ink); }
+  /* ---- prose sections ---------------------------------------------------------
+     (Composition pass pending review of the hero — these currently inherit
+     the token system: serif display, warm palette.) */
+  section.prose { position: relative; padding: 116px 0 0; }
+  .kicker { margin: 0 0 16px; color: var(--accent-ink); }
   section.prose h2 {
-    margin: 0; font-size: clamp(26px, 3.2vw, 36px); font-weight: 650;
-    letter-spacing: -0.018em; line-height: 1.15;
+    margin: 0; font-family: var(--serif); font-weight: 480;
+    font-size: clamp(30px, 3.6vw, 46px); letter-spacing: -0.012em;
+    line-height: 1.12; font-optical-sizing: auto;
   }
   section.prose .section-lede {
-    margin: 16px 0 0; max-width: 60ch; color: var(--ink-2); font-size: 16.5px;
+    margin: 18px 0 0; max-width: 60ch; color: var(--ink-2); font-size: 16.5px;
   }
 
   /* ---- how it works ------------------------------------------------------------- */
@@ -388,9 +464,7 @@
     .top nav a:not(:last-child) { display: none; }
   }
   @media (max-width: 720px) {
-    .hero { padding-top: 64px; }
     section.prose { padding-top: 84px; }
-    .term-rate { margin-left: 0; text-align: left; width: 100%; }
     footer { margin-top: 88px; }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -400,38 +474,47 @@
 </style>
 </head>
 <body>
-<div class="glow" aria-hidden="true"></div>
+<div class="atmo" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
 
 <div class="wrap">
   <header class="top">
     <a class="wordmark" href="#">LIMITBOOK<span class="tick">_</span></a>
     <nav>
-      <a href="#how">How it works</a>
-      <a href="#numbers">Numbers</a>
-      <a href="https://github.com/AarinB1/limitbook">GitHub&nbsp;↗</a>
+      <a href="#how">how it works</a>
+      <a href="#numbers">the numbers</a>
+      <a href="https://github.com/AarinB1/limitbook">github&nbsp;↗</a>
     </nav>
   </header>
 
   <section class="hero">
-    <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>
-      Nasdaq TotalView&#8209;ITCH 5.0 &middot; 2019&#8209;12&#8209;30 &middot; 12:00&ndash;12:20 ET</p>
-    <h1>Real Nasdaq depth, <br><em>rebuilt live</em> in your browser.</h1>
-    <p class="lede">
-      limitbook is a <code>no_std</code> Rust ITCH&nbsp;5.0 engine, compiled to
-      WebAssembly &mdash; parsing the raw exchange feed zero&#8209;copy and
-      reconstructing the limit order book for AAPL, TSLA and SPY as you watch.
-    </p>
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>
+          Nasdaq TotalView&#8209;ITCH 5.0 &middot; 2019&#8209;12&#8209;30 &middot; 12:00&ndash;12:20 ET</p>
+        <h1>Real Nasdaq depth,<br><em>rebuilt live</em> in<br>your browser.</h1>
+        <p class="lede">
+          limitbook is a <code>no_std</code> Rust ITCH&nbsp;5.0 engine, compiled to
+          WebAssembly &mdash; parsing the raw exchange feed zero&#8209;copy and
+          reconstructing the limit order book for AAPL, TSLA and SPY as you watch.
+        </p>
+      </div>
+      <div class="hero-meter">
+        <span class="microlabel">engine throughput &middot; measured in this tab</span>
+        <span class="num" id="s-engine-rate">&ndash;<small> msg/s</small></span>
+        <p class="meter-note">wall&#8209;clock rate through the wasm engine,
+          updating as the replay below runs</p>
+      </div>
+    </div>
   </section>
 
   <section class="stage" aria-label="Live order book replay">
-    <div class="terminal">
-      <div class="term-head">
-        <span class="term-title"><span class="live-dot" aria-hidden="true"></span>LIVE REPLAY</span>
-        <span class="term-sub">AAPL &middot; TSLA &middot; SPY &mdash; 157,824 messages, mid&#8209;day continuous trading</span>
-        <span class="term-rate">
-          <span class="microlabel">engine throughput &middot; measured in this tab</span>
-          <span class="num" id="s-engine-rate">&ndash;<small> msg/s</small></span>
-        </span>
+    <div class="window">
+      <div class="titlebar">
+        <span class="traffic" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="win-title"><span class="live-dot" aria-hidden="true"></span>
+          <b>limitbook replay</b>&nbsp;&mdash; itch50_20191230_midday &middot; wasm32</span>
+        <span class="win-right">AAPL &middot; TSLA &middot; SPY &mdash; 157,824 messages, mid&#8209;day continuous trading</span>
       </div>
       <div class="term-body">
         <div class="transport">
