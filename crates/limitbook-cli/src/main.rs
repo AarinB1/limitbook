@@ -1,7 +1,7 @@
 //! CLI for the limitbook project. All file/OS I/O lives here;
 //! `limitbook-core` stays pure computation.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::process::ExitCode;
@@ -340,7 +340,7 @@ fn filter_stream_windowed(
 ) -> Result<FilterStats, String> {
     let mut stats = FilterStats::default();
     let mut wanted_locates: HashSet<u16> = HashSet::new();
-    let mut kept_refs: HashSet<u64> = HashSet::new();
+    let mut kept_refs: HashMap<u64, u32> = HashMap::new();
     let mut payload = vec![0u8; u16::MAX as usize];
     loop {
         let mut prefix = [0u8; 2];
@@ -403,18 +403,24 @@ fn filter_stream_windowed(
             Message::AddOrder(m) => {
                 let keep = wanted && in_window;
                 if keep {
-                    kept_refs.insert(m.order_ref);
+                    kept_refs.insert(m.order_ref, m.shares);
                 }
                 keep
             }
-            Message::OrderExecuted(m) => kept_refs.contains(&m.order_ref),
-            Message::OrderExecutedWithPrice(m) => kept_refs.contains(&m.order_ref),
-            Message::OrderCancel(m) => kept_refs.contains(&m.order_ref),
-            Message::OrderDelete(m) => kept_refs.remove(&m.order_ref),
+            Message::OrderExecuted(m) => {
+                reduce_kept_order(&mut kept_refs, m.order_ref, m.executed_shares)
+            }
+            Message::OrderExecutedWithPrice(m) => {
+                reduce_kept_order(&mut kept_refs, m.order_ref, m.executed_shares)
+            }
+            Message::OrderCancel(m) => {
+                reduce_kept_order(&mut kept_refs, m.order_ref, m.cancelled_shares)
+            }
+            Message::OrderDelete(m) => kept_refs.remove(&m.order_ref).is_some(),
             Message::OrderReplace(m) => {
-                let keep = kept_refs.remove(&m.original_order_ref);
+                let keep = kept_refs.remove(&m.original_order_ref).is_some();
                 if keep {
-                    kept_refs.insert(m.new_order_ref);
+                    kept_refs.insert(m.new_order_ref, m.shares);
                 }
                 keep
             }
@@ -430,6 +436,18 @@ fn filter_stream_windowed(
     }
     stats.locates_matched = wanted_locates.len();
     Ok(stats)
+}
+
+fn reduce_kept_order(kept_refs: &mut HashMap<u64, u32>, order_ref: u64, shares: u32) -> bool {
+    let Some(remaining) = kept_refs.get_mut(&order_ref) else {
+        return false;
+    };
+    if shares >= *remaining {
+        kept_refs.remove(&order_ref);
+    } else {
+        *remaining -= shares;
+    }
+    true
 }
 
 /// Reads exactly `buf.len()` bytes. Returns `Ok(false)` on a clean EOF
