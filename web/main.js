@@ -320,6 +320,10 @@ async function main() {
 
   const flashAt = new Map(); // "side:price" -> performance.now() of last change
   let prevShares = new Map();
+  const barLen = new Map(); // "side:price" -> eased on-screen bar length (px)
+  let smoothMax = 0; // eased share scale so the ladder doesn't re-scale in jumps
+  // Honors prefers-reduced-motion (index.html zeroes --flash for it).
+  const EASE = COLOR.flash === "transparent" ? 1 : 0.35;
 
   function drawLadder() {
     const [ctx, W, H] = sizeCanvas($("ladder"));
@@ -358,6 +362,7 @@ async function main() {
     let maxShares = 1;
     for (let i = 0; i < nBid; i++) maxShares = Math.max(maxShares, snap[bidBase + 3 * i + 1]);
     for (let i = 0; i < nAsk; i++) maxShares = Math.max(maxShares, snap[askBase + 3 * i + 1]);
+    smoothMax = smoothMax > 0 ? smoothMax + (maxShares - smoothMax) * EASE * 0.6 : maxShares;
 
     const nextShares = new Map();
     const side = (n, base, dir, barColor, inkColor) => {
@@ -382,7 +387,12 @@ async function main() {
         }
 
         // Depth bar from the center outward, rounded outer end + solid cap.
-        const len = Math.max(2, (shares / maxShares) * barMax);
+        // The length eases toward its target so updates read as movement,
+        // not repaints; new levels grow in from the center line.
+        const target = Math.min(barMax, Math.max(2, (shares / smoothMax) * barMax));
+        const shown = barLen.get(key);
+        const len = shown === undefined ? 2 : shown + (target - shown) * EASE;
+        barLen.set(key, len);
         const xInner = mid + dir * barInner;
         const xOuter = xInner + dir * len;
         const barY = y - rowH / 2 + 3;
@@ -424,6 +434,7 @@ async function main() {
     side(nBid, bidBase, -1, COLOR.bid, COLOR["bid-ink"]);
     side(nAsk, askBase, +1, COLOR.ask, COLOR["ask-ink"]);
     prevShares = nextShares;
+    for (const k of barLen.keys()) if (!nextShares.has(k)) barLen.delete(k);
     if (flashAt.size > 400) {
       for (const [k, t] of flashAt) if (now - t > 400) flashAt.delete(k);
     }

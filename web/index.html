@@ -3,74 +3,169 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>limitbook — live ITCH 5.0 order book in WebAssembly</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e1014'/%3E%3Crect x='3' y='8' width='4' height='2' fill='%23199e70'/%3E%3Crect x='2' y='11' width='5' height='2' fill='%23199e70'/%3E%3Crect x='9' y='8' width='3' height='2' fill='%23e66767'/%3E%3Crect x='9' y='5' width='5' height='2' fill='%23e66767'/%3E%3C/svg%3E">
+<title>limitbook — a Rust ITCH 5.0 engine, live in your browser</title>
+<meta name="description"
+      content="A no_std Rust NASDAQ TotalView-ITCH 5.0 engine, compiled to
+               WebAssembly, rebuilding real Nasdaq depth live in your browser.">
+<meta property="og:title" content="limitbook — real Nasdaq depth, rebuilt live in your browser">
+<meta property="og:description"
+      content="Zero-copy ITCH 5.0 parsing and limit-order-book reconstruction in
+               no_std Rust, compiled to WebAssembly. 268.7M messages validated;
+               browser-vs-CLI parity enforced by CI.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230a0c10'/%3E%3Crect x='3' y='8' width='4' height='2' fill='%232e9e78'/%3E%3Crect x='2' y='11' width='5' height='2' fill='%232e9e78'/%3E%3Crect x='9' y='8' width='3' height='2' fill='%23c05b5b'/%3E%3Crect x='9' y='5' width='5' height='2' fill='%23c05b5b'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
 <style>
-  /* ---- design tokens ------------------------------------------------- */
+  /* ---- design tokens ---------------------------------------------------
+     Mark colors (bid/ask/accent) validated against --surface for lightness
+     band, chroma, CVD separation (ΔE ≥ 15) and ≥3:1 contrast; the *-ink
+     variants are the lighter text steps (≥7:1 WCAG on --surface). main.js
+     reads --mono and the mark/ink tokens by name — keep the names stable. */
   :root {
-    --bg: #0e1014;
-    --surface: #14171c;
-    --surface-2: #1a1e25;
-    --edge: #262b34;
-    --ink: #e8eaee;
-    --ink-2: #9aa1ad;
-    --ink-3: #5d6570;
-    --bid: #199e70;      /* marks (bars) — validated vs dark surface */
-    --ask: #e66767;
-    --bid-ink: #45c691;  /* numerals — lighter step for text contrast */
-    --ask-ink: #f19090;
-    --accent: #3987e5;
+    --bg: #0a0c10;
+    --surface: #11141a;
+    --surface-2: #171b22;
+    --edge: #242a34;
+    --edge-2: #313949;
+    --ink: #e8ebf1;
+    --ink-2: #9aa2b1;
+    --ink-3: #636c7b;
+    --bid: #2e9e78;
+    --ask: #c05b5b;
+    --bid-ink: #56c493;
+    --ask-ink: #e39a94;
+    --accent: #bc862c;
+    --accent-ink: #e5b25c;
     --flash: #f2f4f8;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
-            "Liberation Mono", monospace;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+            "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+            Consolas, "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
+  html { scroll-padding-top: 24px; }
   html, body { margin: 0; }
   body {
     background: var(--bg);
     color: var(--ink);
-    font: 13px/1.5 var(--mono);
-    font-variant-numeric: tabular-nums;
+    font: 400 16px/1.65 var(--sans);
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
-  main { max-width: 1120px; margin: 0 auto; padding: 18px 18px 48px; }
+  /* Every numeral on the page is monospace with fixed-width figures, so
+     nothing shifts as the book ticks. */
+  code, kbd, .num, .mono { font-family: var(--mono); }
+  body { font-variant-numeric: tabular-nums; }
+  a { color: var(--ink-2); text-decoration-color: var(--edge-2); text-underline-offset: 3px; }
+  a:hover { color: var(--ink); }
+  ::selection { background: rgba(188, 134, 44, .30); }
+  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+  code {
+    background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 5px; padding: .08em .35em; font-size: .85em;
+  }
 
-  /* ---- header --------------------------------------------------------- */
-  header {
-    display: flex; align-items: flex-end; justify-content: space-between;
-    gap: 16px; flex-wrap: wrap; padding: 4px 2px 14px;
-  }
-  .brand h1 {
-    font-size: 18px; font-weight: 700; margin: 0;
-    letter-spacing: .12em;
-  }
-  .brand h1 .dim { color: var(--ink-3); font-weight: 400; }
-  .brand p { margin: 2px 0 0; color: var(--ink-2); font-size: 12px; }
-  .brand a { color: var(--ink-2); }
-  .throughput { text-align: right; }
-  .throughput .num {
-    font-size: 30px; font-weight: 700; line-height: 1.1;
-    color: var(--ink);
-  }
-  .throughput .num small { font-size: 14px; font-weight: 400; color: var(--ink-2); }
-
+  .wrap { max-width: 1140px; margin: 0 auto; padding: 0 24px; }
   .microlabel {
-    color: var(--ink-3); font-size: 10px; font-weight: 600;
+    color: var(--ink-2); font: 600 10.5px/1.4 var(--mono);
     text-transform: uppercase; letter-spacing: .14em;
   }
+
+  /* Faint amber field behind the hero — temperature, not decoration. */
+  .glow {
+    position: absolute; inset: 0 0 auto 0; height: 620px;
+    background:
+      radial-gradient(ellipse 90% 65% at 50% -12%, rgba(188, 134, 44, .10), transparent 70%);
+    pointer-events: none;
+  }
+
+  /* ---- top bar --------------------------------------------------------- */
+  .top {
+    position: relative;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 26px 0 0;
+  }
+  .wordmark {
+    font: 700 15px var(--mono); letter-spacing: .18em; color: var(--ink);
+    text-decoration: none;
+  }
+  .wordmark .tick { color: var(--accent-ink); }
+  .top nav { display: flex; gap: 26px; }
+  .top nav a {
+    font: 500 13px var(--sans); letter-spacing: .02em;
+    color: var(--ink-2); text-decoration: none;
+  }
+  .top nav a:hover { color: var(--ink); }
+
+  /* ---- hero -------------------------------------------------------------- */
+  .hero { position: relative; text-align: center; padding: 88px 0 44px; }
+  .hero .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    margin: 0 0 26px;
+    font: 500 11.5px var(--mono); letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-2);
+    border: 1px solid var(--edge); border-radius: 999px;
+    padding: 7px 15px; background: rgba(17, 20, 26, .6);
+  }
+  .live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--bid-ink); flex: none;
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+  .hero h1 {
+    margin: 0 auto;
+    font-size: clamp(34px, 5.4vw, 58px); font-weight: 650; line-height: 1.08;
+    letter-spacing: -0.022em;
+  }
+  @media (max-width: 720px) { .hero h1 br { display: none; } }
+  .hero h1 em { font-style: normal; color: var(--accent-ink); }
+  .hero .lede {
+    margin: 22px auto 0; max-width: 62ch;
+    color: var(--ink-2); font-size: 17px; line-height: 1.7;
+  }
+  .hero .lede code { white-space: nowrap; }
+
+  /* ---- terminal (the centerpiece) --------------------------------------- */
+  .stage { position: relative; padding: 28px 0 0; }
+  .terminal {
+    background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 14px; overflow: hidden;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset,
+                0 24px 70px -32px rgba(0, 0, 0, .85);
+    font: 400 13px/1.5 var(--mono);
+  }
+  .term-head {
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 13px 18px; border-bottom: 1px solid var(--edge);
+    background: var(--surface-2);
+  }
+  .term-title { font: 700 12px var(--mono); letter-spacing: .16em; }
+  .term-title .live-dot { display: inline-block; margin-right: 8px; vertical-align: 1px; }
+  .term-sub { color: var(--ink-3); font-size: 11.5px; letter-spacing: .04em; }
+  .term-rate { margin-left: auto; text-align: right; }
+  .term-rate .num {
+    display: block; font-size: 21px; font-weight: 700; line-height: 1.15;
+    color: var(--ink);
+  }
+  .term-rate .num small { font-size: 12px; font-weight: 400; color: var(--ink-2); }
+  .term-body { padding: 14px 14px 0; }
 
   /* ---- transport ------------------------------------------------------ */
   .transport {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    background: var(--surface); border: 1px solid var(--edge);
-    border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+    background: var(--surface-2); border: 1px solid var(--edge);
+    border-radius: 9px; padding: 9px 12px; margin-bottom: 12px;
   }
   button, .seg button {
-    background: var(--surface-2); color: var(--ink);
+    background: var(--surface); color: var(--ink);
     border: 1px solid var(--edge); border-radius: 7px;
     font: 600 12.5px var(--mono); padding: 7px 14px; cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease;
   }
-  button:hover { border-color: var(--ink-3); }
+  button:hover { border-color: var(--edge-2); }
   button:disabled { opacity: .45; cursor: default; }
   #playpause { min-width: 92px; }
   .seg { display: flex; }
@@ -82,7 +177,7 @@
   .seg button:last-child { border-radius: 0 7px 7px 0; border-right-width: 1px; }
   .seg button[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent);
-    color: #fff; font-weight: 700;
+    color: #0a0c10; font-weight: 700;
   }
   .scrub { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 220px; }
   input[type="range"] {
@@ -99,7 +194,7 @@
     appearance: none; -webkit-appearance: none;
     width: 14px; height: 14px; border-radius: 50%;
     background: var(--ink); margin-top: -6px;
-    border: 2px solid var(--bg);
+    border: 2px solid var(--surface);
   }
   input[type="range"]::-moz-range-track {
     height: 4px; border-radius: 2px; background: var(--surface-2);
@@ -110,34 +205,34 @@
   }
   input[type="range"]::-moz-range-thumb {
     width: 12px; height: 12px; border-radius: 50%;
-    background: var(--ink); border: 2px solid var(--bg);
+    background: var(--ink); border: 2px solid var(--surface);
   }
-  #clock { color: var(--ink-2); min-width: 15ch; text-align: right; }
+  #clock { color: var(--ink-2); min-width: 15ch; text-align: right; font-size: 12.5px; }
   #clock b { color: var(--ink); font-weight: 600; }
 
-  /* ---- symbol tabs ----------------------------------------------------- */
+  /* ---- symbol tabs ------------------------------------------------------ */
   .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .tab {
     flex: 1; min-width: 150px; text-align: left; padding: 10px 14px;
-    border-radius: 10px; background: var(--surface);
+    border-radius: 9px; background: var(--surface-2);
   }
-  .tab .sym { font-size: 14px; font-weight: 700; letter-spacing: .06em; }
-  .tab .mid { float: right; font-size: 14px; color: var(--ink-2); }
+  .tab .sym { font-size: 13.5px; font-weight: 700; letter-spacing: .06em; }
+  .tab .mid { float: right; font-size: 13.5px; color: var(--ink-2); }
   .tab[aria-pressed="true"] {
     border-color: var(--accent);
     box-shadow: inset 0 -2px 0 var(--accent);
   }
   .tab[aria-pressed="true"] .mid { color: var(--ink); }
 
-  /* ---- board ----------------------------------------------------------- */
+  /* ---- board ------------------------------------------------------------- */
   .board {
     display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px;
     margin-bottom: 12px;
   }
-  @media (max-width: 860px) { .board { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 880px) { .board { grid-template-columns: minmax(0, 1fr); } }
   .panel {
-    background: var(--surface); border: 1px solid var(--edge);
-    border-radius: 10px; overflow: hidden;
+    background: var(--surface-2); border: 1px solid var(--edge);
+    border-radius: 9px; overflow: hidden;
   }
   .panel .head {
     display: flex; justify-content: space-between; align-items: baseline;
@@ -148,7 +243,7 @@
     display: flex; align-items: baseline; justify-content: center; gap: 22px;
     padding: 12px 14px 4px;
   }
-  .quote .px { font-size: 26px; font-weight: 700; line-height: 1; }
+  .quote .px { font-size: 25px; font-weight: 700; line-height: 1; }
   .quote .bid { color: var(--bid-ink); }
   .quote .ask { color: var(--ask-ink); }
   .quote .mid-block { text-align: center; }
@@ -159,7 +254,7 @@
   #spark { height: 62px; }
   #ladder { height: 420px; }
 
-  /* ---- tape ------------------------------------------------------------ */
+  /* ---- tape ---------------------------------------------------------------- */
   #tape { padding: 4px 0 8px; height: 532px; overflow: hidden; }
   #tape .row {
     display: grid; grid-template-columns: 1fr auto auto 18px;
@@ -173,25 +268,25 @@
   #tape .row .a { text-align: center; color: var(--ink-3); }
   #tape .row.up .a { color: var(--bid-ink); }
   #tape .row.dn .a { color: var(--ask-ink); }
-  #tape .row:first-child { background: var(--surface-2); }
+  #tape .row:first-child { background: var(--surface); }
 
-  /* ---- stats ------------------------------------------------------------ */
-  .stats {
+  /* ---- session strip (inside the terminal) --------------------------------- */
+  .strip {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 8px; margin-bottom: 12px;
   }
   .tile {
-    background: var(--surface); border: 1px solid var(--edge);
-    border-radius: 10px; padding: 9px 13px;
+    background: var(--surface-2); border: 1px solid var(--edge);
+    border-radius: 9px; padding: 8px 13px;
   }
-  .tile .v { font-size: 17px; margin-top: 3px; font-weight: 600; }
+  .tile .v { font-size: 16px; margin-top: 3px; font-weight: 600; }
   .tile .v .ok { color: var(--bid-ink); }
-  .tile .v small { color: var(--ink-3); font-weight: 400; font-size: 12px; }
+  .tile .v small { color: var(--ink-3); font-weight: 400; font-size: 11.5px; }
 
-  /* ---- verdict ----------------------------------------------------------- */
+  /* ---- verdict --------------------------------------------------------------- */
   #verdict {
-    display: none; background: var(--surface); border: 1px solid var(--edge);
-    border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;
+    display: none; background: var(--surface-2); border: 1px solid var(--edge);
+    border-radius: 9px; padding: 12px 16px; margin-bottom: 12px;
     font-size: 12.5px;
   }
   #verdict.pass { border-left: 3px solid var(--bid); }
@@ -201,98 +296,303 @@
   #verdict .fail-mark { color: var(--ask-ink); }
   #verdict .checks { color: var(--ink-2); }
 
-  #status { color: var(--ink-2); font-size: 12px; padding: 2px; }
-  footer { color: var(--ink-3); font-size: 11.5px; margin-top: 18px; }
-  footer a { color: var(--ink-2); }
+  #status {
+    color: var(--ink-2); font-size: 12px; padding: 10px 4px 12px;
+    border-top: 1px solid var(--edge); margin-top: 2px;
+  }
+  .stage-caption {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin: 14px 4px 0; color: var(--ink-3);
+    font: 400 12px/1.6 var(--mono);
+  }
   kbd {
-    background: var(--surface-2); border: 1px solid var(--edge);
+    background: var(--surface); border: 1px solid var(--edge);
     border-radius: 4px; padding: 0 5px; font: inherit; font-size: 10.5px;
   }
-  @media (prefers-reduced-motion: reduce) { :root { --flash: transparent; } }
+
+  /* ---- prose sections --------------------------------------------------------- */
+  section.prose { position: relative; padding: 108px 0 0; }
+  .kicker { margin: 0 0 14px; color: var(--accent-ink); }
+  section.prose h2 {
+    margin: 0; font-size: clamp(26px, 3.2vw, 36px); font-weight: 650;
+    letter-spacing: -0.018em; line-height: 1.15;
+  }
+  section.prose .section-lede {
+    margin: 16px 0 0; max-width: 60ch; color: var(--ink-2); font-size: 16.5px;
+  }
+
+  /* ---- how it works ------------------------------------------------------------- */
+  .steps {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+    margin-top: 44px;
+  }
+  @media (max-width: 880px) { .steps { grid-template-columns: 1fr; } }
+  .step {
+    position: relative; background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 12px; padding: 22px 22px 24px;
+  }
+  .step .n {
+    font: 700 12px var(--mono); letter-spacing: .14em; color: var(--accent-ink);
+  }
+  .step h3 { margin: 12px 0 8px; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+  .step p { margin: 0; color: var(--ink-2); font-size: 14.5px; line-height: 1.65; }
+  .step .n::after {
+    content: ""; display: inline-block; width: 34px; height: 1px;
+    background: var(--edge-2); margin: 0 0 3px 10px;
+  }
+
+  /* ---- credibility band ------------------------------------------------------------ */
+  .cred-band {
+    margin-top: 44px; border-top: 1px solid var(--edge);
+    border-bottom: 1px solid var(--edge);
+    display: grid; grid-template-columns: repeat(3, 1fr);
+  }
+  @media (max-width: 880px) { .cred-band { grid-template-columns: 1fr; } }
+  .stat { padding: 34px 30px 36px; border-left: 1px solid var(--edge); }
+  .stat:first-child { border-left: none; padding-left: 4px; }
+  @media (max-width: 880px) {
+    .stat { border-left: none; border-top: 1px solid var(--edge); padding: 26px 4px; }
+    .stat:first-child { border-top: none; }
+  }
+  .stat .num {
+    font-size: clamp(34px, 4vw, 44px); font-weight: 700; line-height: 1.05;
+    letter-spacing: -0.01em;
+  }
+  .stat .num small { font-size: .48em; font-weight: 500; color: var(--ink-2); letter-spacing: 0; }
+  .stat .label { margin-top: 10px; }
+  .stat p { margin: 12px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.65; }
+  .cred-note { margin: 18px 4px 0; color: var(--ink-3); font-size: 13px; }
+  .cred-note a { color: var(--ink-2); }
+
+  /* ---- footer -------------------------------------------------------------------------- */
+  footer {
+    margin-top: 120px; border-top: 1px solid var(--edge);
+    padding: 34px 0 46px;
+  }
+  .foot {
+    display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .foot .col p { margin: 8px 0 0; color: var(--ink-3); font-size: 13px; max-width: 46ch; }
+  .foot nav { display: flex; gap: 28px; flex-wrap: wrap; }
+  .foot nav a {
+    display: block; font-size: 13.5px; color: var(--ink-2); text-decoration: none;
+    line-height: 2;
+  }
+  .foot nav a:hover { color: var(--ink); }
+  .foot .navlabel { margin-bottom: 4px; }
+  .legal { margin-top: 30px; color: var(--ink-3); font-size: 12px; max-width: 88ch; }
+
+  @media (max-width: 560px) {
+    .top nav { gap: 18px; }
+    .top nav a:not(:last-child) { display: none; }
+  }
+  @media (max-width: 720px) {
+    .hero { padding-top: 64px; }
+    section.prose { padding-top: 84px; }
+    .term-rate { margin-left: 0; text-align: left; width: 100%; }
+    footer { margin-top: 88px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :root { --flash: transparent; }
+    .live-dot { animation: none; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <div class="brand">
-      <h1>LIMITBOOK <span class="dim">/ NASDAQ TotalView-ITCH 5.0</span></h1>
-      <p>A <code>no_std</code> Rust order-book engine compiled to WebAssembly,
-         rebuilding real Nasdaq depth from 2019-12-30, 12:00–12:20 ET —
-         AAPL · TSLA · SPY, live in this tab.</p>
-    </div>
-    <div class="throughput">
-      <div class="microlabel">engine throughput · measured in wasm</div>
-      <div class="num" id="s-engine-rate">–<small> msg/s</small></div>
-    </div>
+<div class="glow" aria-hidden="true"></div>
+
+<div class="wrap">
+  <header class="top">
+    <a class="wordmark" href="#">LIMITBOOK<span class="tick">_</span></a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#numbers">Numbers</a>
+      <a href="https://github.com/AarinB1/limitbook">GitHub&nbsp;↗</a>
+    </nav>
   </header>
 
-  <div class="transport">
-    <button id="playpause" disabled>▶ Play</button>
-    <div class="seg" id="speed" role="group" aria-label="Replay speed"></div>
-    <div class="scrub">
-      <input type="range" id="scrubber" min="0" max="157824" value="0" step="1"
-             aria-label="Position in slice" disabled>
-    </div>
-    <div id="clock"><span class="microlabel">feed clock</span> <b>–</b></div>
-  </div>
+  <section class="hero">
+    <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span>
+      Nasdaq TotalView&#8209;ITCH 5.0 &middot; 2019&#8209;12&#8209;30 &middot; 12:00&ndash;12:20 ET</p>
+    <h1>Real Nasdaq depth, <br><em>rebuilt live</em> in your browser.</h1>
+    <p class="lede">
+      limitbook is a <code>no_std</code> Rust ITCH&nbsp;5.0 engine, compiled to
+      WebAssembly &mdash; parsing the raw exchange feed zero&#8209;copy and
+      reconstructing the limit order book for AAPL, TSLA and SPY as you watch.
+    </p>
+  </section>
 
-  <div class="tabs" id="tabs" role="group" aria-label="Symbol"></div>
-
-  <div class="board">
-    <div class="panel">
-      <div class="quote">
-        <div class="side-block">
-          <div class="microlabel">best bid</div>
-          <div class="px bid" id="q-bid">–</div>
-        </div>
-        <div class="mid-block">
-          <div class="microlabel">spread</div>
-          <div class="spread" id="q-spread">–</div>
-        </div>
-        <div class="side-block">
-          <div class="microlabel">best ask</div>
-          <div class="px ask" id="q-ask">–</div>
-        </div>
+  <section class="stage" aria-label="Live order book replay">
+    <div class="terminal">
+      <div class="term-head">
+        <span class="term-title"><span class="live-dot" aria-hidden="true"></span>LIVE REPLAY</span>
+        <span class="term-sub">AAPL &middot; TSLA &middot; SPY &mdash; 157,824 messages, mid&#8209;day continuous trading</span>
+        <span class="term-rate">
+          <span class="microlabel">engine throughput &middot; measured in this tab</span>
+          <span class="num" id="s-engine-rate">&ndash;<small> msg/s</small></span>
+        </span>
       </div>
-      <canvas id="spark"></canvas>
-      <canvas id="ladder"></canvas>
-    </div>
-    <div class="panel">
-      <div class="head">
-        <span class="microlabel">time &amp; sales</span>
-        <span class="microlabel" id="tape-sym"></span>
+      <div class="term-body">
+        <div class="transport">
+          <button id="playpause" disabled>▶ Play</button>
+          <div class="seg" id="speed" role="group" aria-label="Replay speed"></div>
+          <div class="scrub">
+            <input type="range" id="scrubber" min="0" max="157824" value="0" step="1"
+                   aria-label="Position in slice" disabled>
+          </div>
+          <div id="clock"><span class="microlabel">feed clock</span> <b>&ndash;</b></div>
+        </div>
+
+        <div class="tabs" id="tabs" role="group" aria-label="Symbol"></div>
+
+        <div class="board">
+          <div class="panel">
+            <div class="quote">
+              <div class="side-block">
+                <div class="microlabel">best bid</div>
+                <div class="px bid" id="q-bid">&ndash;</div>
+              </div>
+              <div class="mid-block">
+                <div class="microlabel">spread</div>
+                <div class="spread" id="q-spread">&ndash;</div>
+              </div>
+              <div class="side-block">
+                <div class="microlabel">best ask</div>
+                <div class="px ask" id="q-ask">&ndash;</div>
+              </div>
+            </div>
+            <canvas id="spark"></canvas>
+            <canvas id="ladder"></canvas>
+          </div>
+          <div class="panel">
+            <div class="head">
+              <span class="microlabel">time &amp; sales</span>
+              <span class="microlabel" id="tape-sym"></span>
+            </div>
+            <div id="tape"></div>
+          </div>
+        </div>
+
+        <div class="strip">
+          <div class="tile"><div class="microlabel">messages</div>
+            <div class="v" id="s-msgs">&ndash;</div></div>
+          <div class="tile"><div class="microlabel">replay pace</div>
+            <div class="v" id="s-replay-rate">&ndash;</div></div>
+          <div class="tile"><div class="microlabel">live orders</div>
+            <div class="v" id="s-live">&ndash;</div></div>
+          <div class="tile"><div class="microlabel">invariant violations</div>
+            <div class="v" id="s-viol">&ndash;</div></div>
+          <div class="tile"><div class="microlabel">book checks</div>
+            <div class="v" id="s-verify">deep verify <small>/1k msgs</small></div></div>
+        </div>
+
+        <div id="verdict"></div>
+        <div id="status">Loading engine…</div>
       </div>
-      <div id="tape"></div>
     </div>
-  </div>
+    <p class="stage-caption">
+      <span><kbd>space</kbd> play/pause &nbsp;·&nbsp; <kbd>1</kbd>&ndash;<kbd>5</kbd> speed
+        &nbsp;·&nbsp; <kbd>←</kbd><kbd>→</kbd> seek</span>
+      <span>every number on screen is read back out of the engine</span>
+    </p>
+  </section>
 
-  <div class="stats">
-    <div class="tile"><div class="microlabel">messages</div>
-      <div class="v" id="s-msgs">–</div></div>
-    <div class="tile"><div class="microlabel">replay pace</div>
-      <div class="v" id="s-replay-rate">–</div></div>
-    <div class="tile"><div class="microlabel">live orders</div>
-      <div class="v" id="s-live">–</div></div>
-    <div class="tile"><div class="microlabel">invariant violations</div>
-      <div class="v" id="s-viol">–</div></div>
-    <div class="tile"><div class="microlabel">book checks</div>
-      <div class="v" id="s-verify">deep verify <small>/1k msgs</small></div></div>
-  </div>
+  <section class="prose" id="how">
+    <p class="kicker microlabel">What you're watching</p>
+    <h2>One engine. The CLI runs it natively;<br>your browser runs it in WebAssembly.</h2>
+    <p class="section-lede">
+      There is no simulation layer and no pre-rendered data &mdash; the tab you're
+      in is doing the same work a feed handler does.
+    </p>
+    <div class="steps">
+      <div class="step">
+        <span class="n">01 / RAW BYTES</span>
+        <h3>The wire format, unmodified</h3>
+        <p>Your browser downloads ~1.6&nbsp;MB of gzipped ITCH&nbsp;5.0 &mdash; the
+           binary format Nasdaq actually disseminates. 157,824 length-prefixed
+           messages: adds, executions, cancels, deletes, replaces.</p>
+      </div>
+      <div class="step">
+        <span class="n">02 / ONE ENGINE</span>
+        <h3>The same Rust the CLI runs</h3>
+        <p>The bytes stream through <code>limitbook-core</code>, a
+           <code>#![no_std]</code> crate that parses zero-copy straight off the
+           byte slice &mdash; the exact crate behind the native CLI, compiled
+           unchanged to <code>wasm32-unknown-unknown</code>.</p>
+      </div>
+      <div class="step">
+        <span class="n">03 / BOOK IN YOUR TAB</span>
+        <h3>Reconstructed, then proven</h3>
+        <p>Every price level above is computed in your tab, with a deep
+           consistency check every 1,000 messages. When the replay completes,
+           the final book is compared tick-for-tick against
+           <code>limitbook replay</code>'s output for the same slice.</p>
+      </div>
+    </div>
+  </section>
 
-  <div id="verdict"></div>
-  <div id="status">Loading engine…</div>
+  <section class="prose" id="numbers">
+    <p class="kicker microlabel">Measured, not estimated</p>
+    <h2>The numbers behind the demo.</h2>
+    <div class="cred-band">
+      <div class="stat">
+        <div class="num mono">268.7M</div>
+        <div class="label microlabel">messages &middot; full trading day</div>
+        <p>The complete 2019-12-30 TotalView sample day &mdash; 268,744,780
+           messages &mdash; replayed through parser and book with zero invariant
+           violations and zero parse errors.</p>
+      </div>
+      <div class="stat">
+        <div class="num mono">31.9M<small> msg/s</small></div>
+        <div class="label microlabel">zero-copy parse &middot; single core</div>
+        <p>&asymp;1&nbsp;GB/s of raw feed decoded on one Xeon core, verified by a
+           per-run timestamp checksum. Full book reconstruction included:
+           1.38M&nbsp;msg/s.</p>
+      </div>
+      <div class="stat">
+        <div class="num mono">wasm &equiv; CLI</div>
+        <div class="label microlabel">parity &middot; enforced by CI</div>
+        <p>The browser build must reproduce the CLI's final book state
+           tick-for-tick on both committed fixtures &mdash; asserted in the test
+           suite on every push, and again live at the end of the replay above.</p>
+      </div>
+    </div>
+    <p class="cred-note">
+      Methodology, hardware, and flamegraphs:
+      <a href="https://github.com/AarinB1/limitbook/blob/main/BENCHMARKS.md">BENCHMARKS.md</a>.
+    </p>
+  </section>
 
   <footer>
-    The book above is computed by the exact same <code>limitbook-core</code>
-    engine the CLI runs — parsed zero-copy from the raw ITCH capture your
-    browser just downloaded. When the replay finishes, its final state is
-    checked tick-for-tick against <code>limitbook replay</code>'s output for
-    this slice; CI enforces the same equality on every push.
-    <kbd>space</kbd> play/pause · <kbd>1</kbd>–<kbd>5</kbd> speed ·
-    <kbd>←</kbd><kbd>→</kbd> seek ·
-    <a href="https://github.com/AarinB1/limitbook">source on GitHub</a>
+    <div class="foot">
+      <div class="col">
+        <a class="wordmark" href="#">LIMITBOOK<span class="tick">_</span></a>
+        <p>A zero-copy NASDAQ TotalView-ITCH 5.0 parser and limit order book
+           in <code>no_std</code> Rust.</p>
+      </div>
+      <nav aria-label="Footer">
+        <div>
+          <div class="navlabel microlabel">Project</div>
+          <a href="https://github.com/AarinB1/limitbook">Source on GitHub</a>
+          <a href="https://github.com/AarinB1/limitbook/blob/main/BENCHMARKS.md">Benchmarks</a>
+          <a href="https://github.com/AarinB1/limitbook/tree/main/spec">ITCH 5.0 spec</a>
+        </div>
+        <div>
+          <div class="navlabel microlabel">Author</div>
+          <!-- Personal site slot: swap href + label when the site is live. -->
+          <a href="https://github.com/AarinB1" id="author-link">Aarin Basu</a>
+        </div>
+      </nav>
+    </div>
+    <p class="legal">
+      Replay data is Nasdaq's public TotalView-ITCH sample capture from
+      December&nbsp;30,&nbsp;2019 &mdash; historical data, not a live market feed.
+      Prices shown are reconstructed from the raw message stream for
+      demonstration purposes.
+    </p>
   </footer>
-</main>
+</div>
 <script type="module" src="main.js"></script>
 </body>
 </html>
