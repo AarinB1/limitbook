@@ -234,6 +234,7 @@ async function main() {
     b.onclick = () => {
       selected = locates[s];
       tapeDirty = true;
+      resetLadderState();
       [...tabs.children].forEach((c, j) =>
         c.setAttribute("aria-pressed", String(locates[SYMBOLS[j]] === selected)),
       );
@@ -265,6 +266,7 @@ async function main() {
     sampleSpark();
     simClock = engine.clock_ns();
     lastFrame = performance.now();
+    resetLadderState();
     if (engine.done()) onDone();
     else {
       finishedOnce = false;
@@ -324,6 +326,14 @@ async function main() {
   let smoothMax = 0; // eased share scale so the ladder doesn't re-scale in jumps
   // Honors prefers-reduced-motion (index.html zeroes --flash for it).
   const EASE = COLOR.flash === "transparent" ? 1 : 0.35;
+  const SCALE_EASE = EASE === 1 ? 1 : EASE * 0.6;
+
+  function resetLadderState() {
+    flashAt.clear();
+    prevShares = new Map();
+    barLen.clear();
+    smoothMax = 0;
+  }
 
   function drawLadder() {
     const [ctx, W, H] = sizeCanvas($("ladder"));
@@ -362,7 +372,7 @@ async function main() {
     let maxShares = 1;
     for (let i = 0; i < nBid; i++) maxShares = Math.max(maxShares, snap[bidBase + 3 * i + 1]);
     for (let i = 0; i < nAsk; i++) maxShares = Math.max(maxShares, snap[askBase + 3 * i + 1]);
-    smoothMax = smoothMax > 0 ? smoothMax + (maxShares - smoothMax) * EASE * 0.6 : maxShares;
+    smoothMax = smoothMax > 0 ? smoothMax + (maxShares - smoothMax) * SCALE_EASE : maxShares;
 
     const nextShares = new Map();
     const side = (n, base, dir, barColor, inkColor) => {
