@@ -234,6 +234,7 @@ async function main() {
     b.onclick = () => {
       selected = locates[s];
       tapeDirty = true;
+      resetLadderState();
       [...tabs.children].forEach((c, j) =>
         c.setAttribute("aria-pressed", String(locates[SYMBOLS[j]] === selected)),
       );
@@ -250,7 +251,11 @@ async function main() {
   scrubber.addEventListener("pointerup", () => (scrubbing = false));
 
   function seekTo(target) {
-    if (target < engine.messages()) freshEngine(false);
+    const rebuilt = target < engine.messages();
+    if (rebuilt) {
+      freshEngine(false);
+      resetLadderState();
+    }
     // Drop mid-price history past the new position, then fast-forward in
     // chunks, sampling as we go so the chart shows the path just skipped.
     for (const arr of spark.values()) {
@@ -320,6 +325,18 @@ async function main() {
 
   const flashAt = new Map(); // "side:price" -> performance.now() of last change
   let prevShares = new Map();
+  const barLen = new Map(); // "side:price" -> eased on-screen bar length (px)
+  let smoothMax = 0; // eased share scale so the ladder doesn't re-scale in jumps
+  // Honors prefers-reduced-motion (index.html zeroes --flash for it).
+  const EASE = COLOR.flash === "transparent" ? 1 : 0.35;
+  const SCALE_EASE = EASE === 1 ? 1 : EASE * 0.6;
+
+  function resetLadderState() {
+    flashAt.clear();
+    prevShares = new Map();
+    barLen.clear();
+    smoothMax = 0;
+  }
 
   function drawLadder() {
     const [ctx, W, H] = sizeCanvas($("ladder"));
@@ -358,6 +375,7 @@ async function main() {
     let maxShares = 1;
     for (let i = 0; i < nBid; i++) maxShares = Math.max(maxShares, snap[bidBase + 3 * i + 1]);
     for (let i = 0; i < nAsk; i++) maxShares = Math.max(maxShares, snap[askBase + 3 * i + 1]);
+    smoothMax = smoothMax > 0 ? smoothMax + (maxShares - smoothMax) * SCALE_EASE : maxShares;
 
     const nextShares = new Map();
     const side = (n, base, dir, barColor, inkColor) => {
@@ -382,7 +400,13 @@ async function main() {
         }
 
         // Depth bar from the center outward, rounded outer end + solid cap.
-        const len = Math.max(2, (shares / maxShares) * barMax);
+        // The length eases toward its target so updates read as movement,
+        // not repaints; new levels grow in from the center line unless motion is reduced.
+        const target = Math.min(barMax, Math.max(2, (shares / smoothMax) * barMax));
+        const shown = barLen.get(key);
+        const initialLen = EASE === 1 ? target : 2;
+        const len = shown === undefined ? initialLen : shown + (target - shown) * EASE;
+        barLen.set(key, len);
         const xInner = mid + dir * barInner;
         const xOuter = xInner + dir * len;
         const barY = y - rowH / 2 + 3;
@@ -424,6 +448,7 @@ async function main() {
     side(nBid, bidBase, -1, COLOR.bid, COLOR["bid-ink"]);
     side(nAsk, askBase, +1, COLOR.ask, COLOR["ask-ink"]);
     prevShares = nextShares;
+    for (const k of barLen.keys()) if (!nextShares.has(k)) barLen.delete(k);
     if (flashAt.size > 400) {
       for (const [k, t] of flashAt) if (now - t > 400) flashAt.delete(k);
     }

@@ -7,8 +7,6 @@ on:
   push:
     branches:
       - main
-      # Preview deploy while PR #6 is under review; remove after merge.
-      - claude/demo-polish-deploy-vm8n4b
   workflow_dispatch:
 
 permissions:
