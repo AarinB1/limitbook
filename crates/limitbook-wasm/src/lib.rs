@@ -13,7 +13,7 @@
 //! the caller's job.
 
 use limitbook_core::frame::Messages;
-use limitbook_core::parse::{Side, trim_padding};
+use limitbook_core::parse::{Message, Side, decode, trim_padding};
 use limitbook_core::replay::Replay;
 use wasm_bindgen::prelude::*;
 
@@ -28,7 +28,73 @@ pub struct Engine {
     exhausted: bool,
     /// Whether `Replay::finish` has run (exactly once, after exhaustion).
     finished: bool,
+    /// Timestamp of the most recently fed message (ns since midnight, 0
+    /// before the first) — the feed's own wall clock, for display/pacing.
+    clock: u64,
+    /// Time-and-sales prints accumulated since the last `take_tape` call;
+    /// see [`Engine::take_tape`] for the record layout.
+    tape: Vec<f64>,
     replay: Replay,
+}
+
+/// Appends a time-and-sales record for an execution/trade payload (types
+/// E/C/P) to `tape`. Prices and sides are taken from the message itself or
+/// from the resting order it references — looked up in the book BEFORE the
+/// message is fed, i.e. the true state at execution time. Non-printable "C"
+/// executions are skipped (spec §1.4.2: excluded from time-and-sales).
+fn record_print(replay: &Replay, tape: &mut Vec<f64>, payload: &[u8], clock: u64) {
+    let Ok(msg) = decode(payload) else { return };
+    let (locate, price, shares, resting_side) = match msg {
+        Message::OrderExecuted(m) => {
+            let Some(order) = replay.market().order(m.order_ref) else {
+                return;
+            };
+            (
+                m.header.stock_locate,
+                order.price,
+                u64::from(m.executed_shares),
+                Some(order.side),
+            )
+        }
+        Message::OrderExecutedWithPrice(m) => {
+            if m.printable != b'Y' {
+                return;
+            }
+            let side = replay.market().order(m.order_ref).map(|o| o.side);
+            (
+                m.header.stock_locate,
+                m.execution_price,
+                u64::from(m.executed_shares),
+                side,
+            )
+        }
+        // "P" trades hit non-displayed interest; their Side field is
+        // always "B" per spec (uninformative), so the aggressor is unknown.
+        Message::Trade(m) => (m.header.stock_locate, m.price, u64::from(m.shares), None),
+        _ => return,
+    };
+    // A resting Sell was lifted by a buyer, and vice versa.
+    let aggressor = match resting_side {
+        Some(Side::Sell) => 1.0,
+        Some(Side::Buy) => -1.0,
+        None => 0.0,
+    };
+    tape.extend_from_slice(&[
+        f64::from(locate),
+        f64::from(price.0),
+        shares as f64,
+        aggressor,
+        clock as f64,
+    ]);
+}
+
+/// Timestamp from the uniform header: offset 5, 6 bytes big-endian, ns
+/// since midnight (spec/itch50_spec.txt; every framed payload is at least
+/// 11 bytes).
+fn header_timestamp(payload: &[u8]) -> u64 {
+    let mut ts = [0u8; 8];
+    ts[2..8].copy_from_slice(&payload[5..11]);
+    u64::from_be_bytes(ts)
 }
 
 #[wasm_bindgen]
@@ -43,6 +109,8 @@ impl Engine {
             offset: 0,
             exhausted: false,
             finished: false,
+            clock: 0,
+            tape: Vec::new(),
             replay: Replay::new(u64::from(verify_every)),
         }
     }
@@ -59,6 +127,10 @@ impl Engine {
         while fed < max {
             match it.next() {
                 Some(Ok(payload)) => {
+                    self.clock = header_timestamp(payload);
+                    if matches!(payload[0], b'E' | b'C' | b'P') {
+                        record_print(&self.replay, &mut self.tape, payload, self.clock);
+                    }
                     self.replay.feed(payload);
                     fed += 1;
                 }
@@ -87,6 +159,23 @@ impl Engine {
     /// Framed messages processed so far.
     pub fn messages(&self) -> f64 {
         self.replay.stats().messages as f64
+    }
+
+    /// The feed's own wall clock: timestamp of the most recently fed
+    /// message, in ns since midnight ET (0 before the first message).
+    /// Exact as f64 — a day is < 2^53 ns.
+    pub fn clock_ns(&self) -> f64 {
+        self.clock as f64
+    }
+
+    /// Drains time-and-sales prints accumulated since the last call, as a
+    /// flat array of 5-element records:
+    /// `(locate, price_ticks, shares, aggressor, clock_ns)` in feed order.
+    /// `aggressor` is +1 when a resting Sell was hit (buyer-initiated), -1
+    /// for a resting Buy, 0 unknown (non-displayed "P" trades). Prices are
+    /// raw Price(4) ticks.
+    pub fn take_tape(&mut self) -> Vec<f64> {
+        core::mem::take(&mut self.tape)
     }
 
     /// Total invariant violations of any kind (0 on a clean replay).

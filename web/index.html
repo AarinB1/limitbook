@@ -3,69 +3,295 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>limitbook — ITCH 5.0 order book in the browser (wasm)</title>
+<title>limitbook — live ITCH 5.0 order book in WebAssembly</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230e1014'/%3E%3Crect x='3' y='8' width='4' height='2' fill='%23199e70'/%3E%3Crect x='2' y='11' width='5' height='2' fill='%23199e70'/%3E%3Crect x='9' y='8' width='3' height='2' fill='%23e66767'/%3E%3Crect x='9' y='5' width='5' height='2' fill='%23e66767'/%3E%3C/svg%3E">
 <style>
+  /* ---- design tokens ------------------------------------------------- */
   :root {
-    --surface: #1a1a19;
-    --panel: #232322;
-    --ink: #e8e6e3;
-    --ink-muted: #9b9893;
-    --bid: #3987e5;
+    --bg: #0e1014;
+    --surface: #14171c;
+    --surface-2: #1a1e25;
+    --edge: #262b34;
+    --ink: #e8eaee;
+    --ink-2: #9aa1ad;
+    --ink-3: #5d6570;
+    --bid: #199e70;      /* marks (bars) — validated vs dark surface */
     --ask: #e66767;
-    --good: #34a534;
+    --bid-ink: #45c691;  /* numerals — lighter step for text contrast */
+    --ask-ink: #f19090;
+    --accent: #3987e5;
+    --flash: #f2f4f8;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+            "Liberation Mono", monospace;
   }
   * { box-sizing: border-box; }
+  html, body { margin: 0; }
   body {
-    margin: 0;
-    background: var(--surface);
+    background: var(--bg);
     color: var(--ink);
-    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font: 13px/1.5 var(--mono);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
   }
-  main { max-width: 860px; margin: 0 auto; padding: 20px 16px 40px; }
-  h1 { font-size: 17px; margin: 0 0 2px; font-weight: 600; }
-  .sub { color: var(--ink-muted); margin: 0 0 16px; font-size: 12.5px; }
-  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
-  button, select {
-    background: var(--panel); color: var(--ink);
-    border: 1px solid #3a3a38; border-radius: 6px;
-    font: inherit; padding: 6px 14px; cursor: pointer;
+  main { max-width: 1120px; margin: 0 auto; padding: 18px 18px 48px; }
+
+  /* ---- header --------------------------------------------------------- */
+  header {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; padding: 4px 2px 14px;
   }
-  button:hover, select:hover { border-color: #55534f; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 14px; }
-  .tile { background: var(--panel); border-radius: 8px; padding: 8px 12px; }
-  .tile .k { color: var(--ink-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
-  .tile .v { font-size: 16px; margin-top: 2px; font-variant-numeric: tabular-nums; }
-  #verdict { margin-top: 14px; padding: 10px 14px; border-radius: 8px; background: var(--panel); display: none; }
-  #verdict.pass { border-left: 3px solid var(--good); }
+  .brand h1 {
+    font-size: 18px; font-weight: 700; margin: 0;
+    letter-spacing: .12em;
+  }
+  .brand h1 .dim { color: var(--ink-3); font-weight: 400; }
+  .brand p { margin: 2px 0 0; color: var(--ink-2); font-size: 12px; }
+  .brand a { color: var(--ink-2); }
+  .throughput { text-align: right; }
+  .throughput .num {
+    font-size: 30px; font-weight: 700; line-height: 1.1;
+    color: var(--ink);
+  }
+  .throughput .num small { font-size: 14px; font-weight: 400; color: var(--ink-2); }
+
+  .microlabel {
+    color: var(--ink-3); font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: .14em;
+  }
+
+  /* ---- transport ------------------------------------------------------ */
+  .transport {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+  }
+  button, .seg button {
+    background: var(--surface-2); color: var(--ink);
+    border: 1px solid var(--edge); border-radius: 7px;
+    font: 600 12.5px var(--mono); padding: 7px 14px; cursor: pointer;
+  }
+  button:hover { border-color: var(--ink-3); }
+  button:disabled { opacity: .45; cursor: default; }
+  #playpause { min-width: 92px; }
+  .seg { display: flex; }
+  .seg button {
+    border-radius: 0; border-right-width: 0; padding: 7px 11px;
+    color: var(--ink-2); font-weight: 500;
+  }
+  .seg button:first-child { border-radius: 7px 0 0 7px; }
+  .seg button:last-child { border-radius: 0 7px 7px 0; border-right-width: 1px; }
+  .seg button[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent);
+    color: #fff; font-weight: 700;
+  }
+  .scrub { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 220px; }
+  input[type="range"] {
+    flex: 1; appearance: none; -webkit-appearance: none; height: 22px;
+    background: transparent; cursor: pointer; margin: 0;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px;
+    background: linear-gradient(to right,
+      var(--accent) var(--progress, 0%), var(--surface-2) var(--progress, 0%));
+    border: 1px solid var(--edge);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    appearance: none; -webkit-appearance: none;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--ink); margin-top: -6px;
+    border: 2px solid var(--bg);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 4px; border-radius: 2px; background: var(--surface-2);
+    border: 1px solid var(--edge);
+  }
+  input[type="range"]::-moz-range-progress {
+    height: 4px; border-radius: 2px; background: var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--ink); border: 2px solid var(--bg);
+  }
+  #clock { color: var(--ink-2); min-width: 15ch; text-align: right; }
+  #clock b { color: var(--ink); font-weight: 600; }
+
+  /* ---- symbol tabs ----------------------------------------------------- */
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tab {
+    flex: 1; min-width: 150px; text-align: left; padding: 10px 14px;
+    border-radius: 10px; background: var(--surface);
+  }
+  .tab .sym { font-size: 14px; font-weight: 700; letter-spacing: .06em; }
+  .tab .mid { float: right; font-size: 14px; color: var(--ink-2); }
+  .tab[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: inset 0 -2px 0 var(--accent);
+  }
+  .tab[aria-pressed="true"] .mid { color: var(--ink); }
+
+  /* ---- board ----------------------------------------------------------- */
+  .board {
+    display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px;
+    margin-bottom: 12px;
+  }
+  @media (max-width: 860px) { .board { grid-template-columns: minmax(0, 1fr); } }
+  .panel {
+    background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 10px; overflow: hidden;
+  }
+  .panel .head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 10px 14px 0;
+  }
+
+  .quote {
+    display: flex; align-items: baseline; justify-content: center; gap: 22px;
+    padding: 12px 14px 4px;
+  }
+  .quote .px { font-size: 26px; font-weight: 700; line-height: 1; }
+  .quote .bid { color: var(--bid-ink); }
+  .quote .ask { color: var(--ask-ink); }
+  .quote .mid-block { text-align: center; }
+  .quote .spread { font-size: 15px; color: var(--ink); font-weight: 600; }
+  .quote .side-block { text-align: center; }
+
+  canvas { display: block; width: 100%; }
+  #spark { height: 62px; }
+  #ladder { height: 420px; }
+
+  /* ---- tape ------------------------------------------------------------ */
+  #tape { padding: 4px 0 8px; height: 532px; overflow: hidden; }
+  #tape .row {
+    display: grid; grid-template-columns: 1fr auto auto 18px;
+    gap: 10px; padding: 3px 14px; font-size: 12.5px;
+  }
+  #tape .row .t { color: var(--ink-3); }
+  #tape .row .p { text-align: right; font-weight: 600; }
+  #tape .row .s { text-align: right; color: var(--ink-2); }
+  #tape .row.up .p { color: var(--bid-ink); }
+  #tape .row.dn .p { color: var(--ask-ink); }
+  #tape .row .a { text-align: center; color: var(--ink-3); }
+  #tape .row.up .a { color: var(--bid-ink); }
+  #tape .row.dn .a { color: var(--ask-ink); }
+  #tape .row:first-child { background: var(--surface-2); }
+
+  /* ---- stats ------------------------------------------------------------ */
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 8px; margin-bottom: 12px;
+  }
+  .tile {
+    background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 10px; padding: 9px 13px;
+  }
+  .tile .v { font-size: 17px; margin-top: 3px; font-weight: 600; }
+  .tile .v .ok { color: var(--bid-ink); }
+  .tile .v small { color: var(--ink-3); font-weight: 400; font-size: 12px; }
+
+  /* ---- verdict ----------------------------------------------------------- */
+  #verdict {
+    display: none; background: var(--surface); border: 1px solid var(--edge);
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;
+    font-size: 12.5px;
+  }
+  #verdict.pass { border-left: 3px solid var(--bid); }
   #verdict.fail { border-left: 3px solid var(--ask); }
-  canvas { width: 100%; background: var(--panel); border-radius: 10px; display: block; }
-  #status { color: var(--ink-muted); margin: 10px 0; }
+  #verdict .title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+  #verdict .pass-mark { color: var(--bid-ink); }
+  #verdict .fail-mark { color: var(--ask-ink); }
+  #verdict .checks { color: var(--ink-2); }
+
+  #status { color: var(--ink-2); font-size: 12px; padding: 2px; }
+  footer { color: var(--ink-3); font-size: 11.5px; margin-top: 18px; }
+  footer a { color: var(--ink-2); }
+  kbd {
+    background: var(--surface-2); border: 1px solid var(--edge);
+    border-radius: 4px; padding: 0 5px; font: inherit; font-size: 10.5px;
+  }
+  @media (prefers-reduced-motion: reduce) { :root { --flash: transparent; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>limitbook · NASDAQ TotalView-ITCH 5.0 replay</h1>
-  <p class="sub">The same no_std Rust engine the CLI runs, compiled to WebAssembly,
-    reconstructing the 2019-12-30 pre-market fixture live in your browser.</p>
+  <header>
+    <div class="brand">
+      <h1>LIMITBOOK <span class="dim">/ NASDAQ TotalView-ITCH 5.0</span></h1>
+      <p>A <code>no_std</code> Rust order-book engine compiled to WebAssembly,
+         rebuilding real Nasdaq depth from 2019-12-30, 12:00–12:20 ET —
+         AAPL · TSLA · SPY, live in this tab.</p>
+    </div>
+    <div class="throughput">
+      <div class="microlabel">engine throughput · measured in wasm</div>
+      <div class="num" id="s-engine-rate">–<small> msg/s</small></div>
+    </div>
+  </header>
 
-  <div class="controls">
-    <button id="playpause" disabled>Play</button>
-    <label>Symbol <select id="symbol" disabled></select></label>
-    <span id="status">Loading fixture…</span>
+  <div class="transport">
+    <button id="playpause" disabled>▶ Play</button>
+    <div class="seg" id="speed" role="group" aria-label="Replay speed"></div>
+    <div class="scrub">
+      <input type="range" id="scrubber" min="0" max="157824" value="0" step="1"
+             aria-label="Position in slice" disabled>
+    </div>
+    <div id="clock"><span class="microlabel">feed clock</span> <b>–</b></div>
+  </div>
+
+  <div class="tabs" id="tabs" role="group" aria-label="Symbol"></div>
+
+  <div class="board">
+    <div class="panel">
+      <div class="quote">
+        <div class="side-block">
+          <div class="microlabel">best bid</div>
+          <div class="px bid" id="q-bid">–</div>
+        </div>
+        <div class="mid-block">
+          <div class="microlabel">spread</div>
+          <div class="spread" id="q-spread">–</div>
+        </div>
+        <div class="side-block">
+          <div class="microlabel">best ask</div>
+          <div class="px ask" id="q-ask">–</div>
+        </div>
+      </div>
+      <canvas id="spark"></canvas>
+      <canvas id="ladder"></canvas>
+    </div>
+    <div class="panel">
+      <div class="head">
+        <span class="microlabel">time &amp; sales</span>
+        <span class="microlabel" id="tape-sym"></span>
+      </div>
+      <div id="tape"></div>
+    </div>
   </div>
 
   <div class="stats">
-    <div class="tile"><div class="k">Messages</div><div class="v" id="s-msgs">–</div></div>
-    <div class="tile"><div class="k">Engine msg/s (in wasm)</div><div class="v" id="s-engine-rate">–</div></div>
-    <div class="tile"><div class="k">Replay msg/s (paced)</div><div class="v" id="s-replay-rate">–</div></div>
-    <div class="tile"><div class="k">Best bid / ask</div><div class="v" id="s-quote">–</div></div>
-    <div class="tile"><div class="k">Spread</div><div class="v" id="s-spread">–</div></div>
-    <div class="tile"><div class="k">Live orders</div><div class="v" id="s-live">–</div></div>
-    <div class="tile"><div class="k">Violations</div><div class="v" id="s-viol">–</div></div>
+    <div class="tile"><div class="microlabel">messages</div>
+      <div class="v" id="s-msgs">–</div></div>
+    <div class="tile"><div class="microlabel">replay pace</div>
+      <div class="v" id="s-replay-rate">–</div></div>
+    <div class="tile"><div class="microlabel">live orders</div>
+      <div class="v" id="s-live">–</div></div>
+    <div class="tile"><div class="microlabel">invariant violations</div>
+      <div class="v" id="s-viol">–</div></div>
+    <div class="tile"><div class="microlabel">book checks</div>
+      <div class="v" id="s-verify">deep verify <small>/1k msgs</small></div></div>
   </div>
 
-  <canvas id="ladder" width="1720" height="1040"></canvas>
   <div id="verdict"></div>
+  <div id="status">Loading engine…</div>
+
+  <footer>
+    The book above is computed by the exact same <code>limitbook-core</code>
+    engine the CLI runs — parsed zero-copy from the raw ITCH capture your
+    browser just downloaded. When the replay finishes, its final state is
+    checked tick-for-tick against <code>limitbook replay</code>'s output for
+    this slice; CI enforces the same equality on every push.
+    <kbd>space</kbd> play/pause · <kbd>1</kbd>–<kbd>5</kbd> speed ·
+    <kbd>←</kbd><kbd>→</kbd> seek ·
+    <a href="https://github.com/AarinB1/limitbook">source on GitHub</a>
+  </footer>
 </main>
 <script type="module" src="main.js"></script>
 </body>
