@@ -498,7 +498,8 @@ async function main() {
     $("s-live").textContent = engine.live_orders().toLocaleString();
     const viol = engine.violations();
     $("s-viol").innerHTML = viol === 0 ? `0 <span class="ok">✓</span>` : String(viol);
-    $("s-verify").innerHTML = `passing <small>deep verify /1k msgs</small>`;
+    $("s-verify").innerHTML =
+      `${viol === 0 ? "passing" : "failing"} <small>deep verify /1k msgs</small>`;
     $("clock").innerHTML =
       `<span class="microlabel">feed clock</span> <b>${fmtClock(engine.clock_ns())}</b> ET`;
 
