@@ -9,10 +9,16 @@ Zero-copy NASDAQ TotalView-ITCH 5.0 parser + limit order book in Rust.
   `wasm32-unknown-unknown` (CI enforces with a wasm build). Dev-dependencies
   are exempt.
 - `crates/limitbook-cli` — binary `limitbook`. All I/O lives here.
-- `tests/fixtures/` — checked-in ground truth (~1 MB gzipped, symbol-filtered
-  slice of sample day 2019-12-30). Regenerate: `tools/regen_fixture.sh`.
-  Tests and CI must never require the multi-GB raw file; raw `.itch`/`.gz`
-  captures are gitignored.
+- `crates/limitbook-wasm` — wasm-bindgen glue over the core replay engine
+  for the browser demo; presentation metadata only, no market logic.
+- `web/` — browser demo (static; `web/build.sh` builds wasm+glue into
+  `web/pkg/`, `.github/workflows/pages.yml` deploys to GitHub Pages on
+  merge to main).
+- `tests/fixtures/` — checked-in ground truth: a pre-market slice
+  (`tools/regen_fixture.sh`) and a mid-day continuous-trading slice the
+  demo replays (`tools/regen_midday_fixture.sh`), both ~1 MB gzipped,
+  symbol-filtered from sample day 2019-12-30. Tests and CI must never
+  require the multi-GB raw file; raw `.itch`/`.gz` captures are gitignored.
 
 ## Source of truth
 
@@ -32,8 +38,10 @@ integers big-endian; sample files frame each payload with a u16 length prefix.
 
 0. Scaffolding + ground truth (done) → 1. zero-copy parser (done) →
 2. order book (done; `limitbook replay` replays the fixture with zero
-invariant violations) → 3. throughput/benchmarks + queue-position tracking →
-4. WASM browser demo.
+invariant violations) → 3. throughput/benchmarks (done; queue-position
+tracking still open) → 4. WASM browser demo (done; live on GitHub Pages,
+browser final state must equal `limitbook replay` on both fixtures —
+enforced by `crates/limitbook-wasm/tests/fixture_via_engine.rs`).
 
 ## CI
 

@@ -1,0 +1,78 @@
+# Builds the wasm demo (web/build.sh) and publishes web/ + the mid-day
+# fixture to GitHub Pages. Runs on every merge to main so the live demo
+# tracks the repo; workflow_dispatch allows deploying a branch for preview.
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      # Preview deploy while PR #6 is under review; remove after merge.
+      - claude/demo-polish-deploy-vm8n4b
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # web/build.sh pins this exact version; the JS glue it emits must
+      # match the wasm-bindgen crate version in Cargo.lock.
+      - name: Cache wasm-bindgen-cli
+        id: cache-wasm-bindgen
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/wasm-bindgen
+          key: wasm-bindgen-cli-0.2.126-${{ runner.os }}
+
+      - name: Install wasm-bindgen-cli
+        if: steps.cache-wasm-bindgen.outputs.cache-hit != 'true'
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+
+      - name: Build wasm bundle
+        run: ./web/build.sh
+
+      # The site is web/ with the demo's capture alongside index.html
+      # (main.js fetches ./itch50_20191230_midday.itch.gz first, falling
+      # back to ../tests/fixtures/ for local repo-root serving).
+      - name: Assemble site
+        run: |
+          mkdir -p dist
+          cp web/index.html web/main.js dist/
+          cp -r web/pkg dist/pkg
+          cp tests/fixtures/itch50_20191230_midday.itch.gz dist/
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
