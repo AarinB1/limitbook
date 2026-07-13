@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 660" width="880" height="660" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" role="img" aria-label="limitbook architecture: a gzip-compressed NASDAQ ITCH 5.0 feed flows into the shared no_std limitbook-core engine (zero-copy framing, typed decode, order-book reconstruction), which powers two consumers: the native limitbook-cli binary and limitbook-core compiled to wasm32 for the browser demo.">
+  <defs>
+    <!-- Arrowheads -->
+    <marker id="arrowRust" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#c1481f"/>
+    </marker>
+    <marker id="arrowInk" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a7f72"/>
+    </marker>
+    <style>
+      .ink   { fill: #2b2620; }
+      .muted { fill: #6f665b; }
+      .faint { fill: #8a7f72; }
+      .rust  { fill: #c1481f; }
+      .title { font-weight: 700; letter-spacing: 0.2px; }
+      .sans  { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Panel background: own light warm panel so the diagram is legible in
+       both GitHub light and dark themes (dark ink never sits on dark bg). -->
+  <rect x="0.5" y="0.5" width="879" height="659" rx="14" fill="#faf6f1" stroke="#e7ddd1" stroke-width="1"/>
+
+  <!-- Header -->
+  <text x="40" y="46" class="ink title" font-size="21">limitbook</text>
+  <text x="40" y="68" class="muted sans" font-size="13">Zero-copy NASDAQ TotalView-ITCH 5.0 parser + limit order book &#183; one shared engine, two targets</text>
+  <line x1="40" y1="82" x2="840" y2="82" stroke="#ece3d7" stroke-width="1"/>
+
+  <!-- ============================================================ -->
+  <!-- 1. INPUT FEED                                                -->
+  <!-- ============================================================ -->
+  <g>
+    <rect x="300" y="104" width="280" height="58" rx="9" fill="#ffffff" stroke="#d8cec2" stroke-width="1.4"/>
+    <text x="440" y="128" text-anchor="middle" class="ink title" font-size="13">NASDAQ TotalView-ITCH 5.0</text>
+    <text x="440" y="147" text-anchor="middle" class="muted" font-size="11.5">gzip-compressed capture &#183; u16 length-prefixed frames</text>
+  </g>
+
+  <!-- feed -> core -->
+  <line x1="440" y1="162" x2="440" y2="196" stroke="#c1481f" stroke-width="2.2" marker-end="url(#arrowRust)"/>
+  <text x="452" y="184" class="faint sans" font-size="10.5">byte slices</text>
+
+  <!-- ============================================================ -->
+  <!-- 2. limitbook-core  (DOMINANT CENTREPIECE)                    -->
+  <!-- ============================================================ -->
+  <g>
+    <!-- soft rust glow to weight the eye here first -->
+    <rect x="70" y="202" width="740" height="238" rx="16" fill="#c1481f" opacity="0.06"/>
+    <rect x="76" y="208" width="728" height="226" rx="14" fill="#fdf2ec" stroke="#c1481f" stroke-width="2.4"/>
+
+    <!-- core title row -->
+    <text x="100" y="240" class="rust title" font-size="17">crates/limitbook-core</text>
+    <g class="sans" font-size="10.5">
+      <rect x="628" y="224" width="152" height="22" rx="11" fill="#ffffff" stroke="#e3c3b4" stroke-width="1"/>
+      <text x="704" y="239" text-anchor="middle" class="rust title" font-size="10.5" font-family="ui-monospace, monospace">#![no_std] &#183; I/O-free</text>
+    </g>
+    <text x="100" y="258" class="muted sans" font-size="11.5">Pure computation over byte slices &#8212; the single engine both targets run.</text>
+
+    <!-- internal pipeline: three stages, left to right -->
+    <!-- stage: frame -->
+    <rect x="100" y="276" width="212" height="104" rx="10" fill="#ffffff" stroke="#dcc9bd" stroke-width="1.3"/>
+    <text x="118" y="300" class="ink title" font-size="12.5">zero-copy framing</text>
+    <text x="118" y="317" class="faint" font-size="10.5">frame.rs</text>
+    <text x="118" y="340" class="muted sans" font-size="11">Walks u16 length-prefixed</text>
+    <text x="118" y="356" class="muted sans" font-size="11">frames; no copies, no alloc.</text>
+
+    <!-- stage: decode -->
+    <rect x="334" y="276" width="212" height="104" rx="10" fill="#ffffff" stroke="#dcc9bd" stroke-width="1.3"/>
+    <text x="352" y="300" class="ink title" font-size="12.5">typed decode</text>
+    <text x="352" y="317" class="faint" font-size="10.5">parse.rs</text>
+    <text x="352" y="340" class="muted sans" font-size="11">ITCH 5.0 message types,</text>
+    <text x="352" y="356" class="muted sans" font-size="11">big-endian, spec offsets.</text>
+
+    <!-- stage: book -->
+    <rect x="568" y="276" width="212" height="104" rx="10" fill="#ffffff" stroke="#dcc9bd" stroke-width="1.3"/>
+    <text x="586" y="300" class="ink title" font-size="12.5">order-book rebuild</text>
+    <text x="586" y="317" class="faint" font-size="10.5">book.rs</text>
+    <text x="586" y="340" class="muted sans" font-size="11">Per-symbol books, price-time</text>
+    <text x="586" y="356" class="muted sans" font-size="11">priority, id map + levels.</text>
+
+    <!-- internal flow arrows -->
+    <line x1="312" y1="328" x2="332" y2="328" stroke="#8a7f72" stroke-width="1.8" marker-end="url(#arrowInk)"/>
+    <line x1="546" y1="328" x2="566" y2="328" stroke="#8a7f72" stroke-width="1.8" marker-end="url(#arrowInk)"/>
+
+    <!-- engine footer strip -->
+    <line x1="100" y1="398" x2="780" y2="398" stroke="#f0dccf" stroke-width="1"/>
+    <text x="100" y="420" class="ink" font-size="11.5"><tspan class="rust title">replay::Replay</tspan><tspan class="muted"> &#8212; the shared feed/finish engine both consumers drive</tspan></text>
+    <text x="780" y="420" text-anchor="end" class="faint sans" font-size="10.5">builds for wasm32-unknown-unknown</text>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- 3. TWO CONSUMERS branch off the one core                     -->
+  <!-- ============================================================ -->
+  <!-- fan-out: single origin at core bottom-centre splits to two targets -->
+  <path d="M440,440 L440,474" fill="none" stroke="#c1481f" stroke-width="2.4"/>
+  <path d="M440,474 L230,474 L230,506" fill="none" stroke="#c1481f" stroke-width="2.4" marker-end="url(#arrowRust)"/>
+  <path d="M440,474 L650,474 L650,506" fill="none" stroke="#c1481f" stroke-width="2.4" marker-end="url(#arrowRust)"/>
+  <circle cx="440" cy="474" r="3.4" fill="#c1481f"/>
+  <text x="440" y="466" text-anchor="middle" class="rust title sans" font-size="10.5">one engine &#8594; two targets</text>
+
+  <!-- consumer A: native CLI -->
+  <g>
+    <rect x="70" y="508" width="320" height="118" rx="12" fill="#ffffff" stroke="#d8cec2" stroke-width="1.4"/>
+    <text x="92" y="536" class="ink title" font-size="14">crates/limitbook-cli</text>
+    <text x="92" y="554" class="faint" font-size="10.5">native binary &#183; links core as a Rust crate</text>
+    <line x1="92" y1="566" x2="368" y2="566" stroke="#efe6da" stroke-width="1"/>
+    <text x="92" y="586" class="muted sans" font-size="11.5"><tspan class="ink" font-family="ui-monospace, monospace">replay</tspan> &#183; <tspan class="ink" font-family="ui-monospace, monospace">bench</tspan> &#183; <tspan class="ink" font-family="ui-monospace, monospace">make-fixture</tspan></text>
+    <text x="92" y="606" class="muted sans" font-size="11.5">All file + gzip I/O lives here (flate2), keeping</text>
+    <text x="92" y="621" class="muted sans" font-size="11.5">core no_std &#8212; which is why it targets wasm.</text>
+  </g>
+
+  <!-- consumer B: wasm browser demo -->
+  <g>
+    <rect x="490" y="508" width="320" height="118" rx="12" fill="#ffffff" stroke="#d8cec2" stroke-width="1.4"/>
+    <text x="512" y="536" class="ink title" font-size="14">crates/limitbook-wasm</text>
+    <text x="512" y="554" class="faint" font-size="10.5">core compiled to wasm32 &#183; wasm-bindgen glue</text>
+    <line x1="512" y1="566" x2="788" y2="566" stroke="#efe6da" stroke-width="1"/>
+    <text x="512" y="586" class="muted sans" font-size="11.5"><tspan class="ink" font-family="ui-monospace, monospace">Engine</tspan> forwards each frame to <tspan class="ink" font-family="ui-monospace, monospace">Replay</tspan>;</text>
+    <text x="512" y="606" class="muted sans" font-size="11.5">no market logic, presentation only.</text>
+    <text x="512" y="621" class="muted sans" font-size="11.5">Drives the live browser demo (GitHub Pages).</text>
+  </g>
+</svg>
