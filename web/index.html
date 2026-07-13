@@ -65,6 +65,14 @@
       0 1px 2px rgba(62, 50, 32, .22),
       0 24px 48px -16px rgba(62, 50, 32, .3),
       0 80px 160px -40px rgba(62, 50, 32, .38);
+    /* soft warm elevation for page-chrome cards — lighter than the window,
+       so raised paper reads as lifted, not floating like the demo. */
+    --pg-shadow:
+      0 1px 2px rgba(62, 50, 32, .05),
+      0 10px 24px -12px rgba(62, 50, 32, .16);
+    --pg-shadow-lg:
+      0 2px 6px rgba(62, 50, 32, .07),
+      0 30px 60px -24px rgba(62, 50, 32, .22);
   }
   * { box-sizing: border-box; }
   html { scroll-padding-top: 24px; background: var(--pg-bg); }
@@ -405,10 +413,47 @@
     border-radius: 4px; padding: 0 5px; font: inherit; font-size: 10.5px;
   }
 
-  /* ---- prose sections ---------------------------------------------------------
-     (Composition pass pending review of the hero — these currently inherit
-     the token system: serif display, warm palette.) */
-  section.prose { position: relative; padding: 116px 0 0; }
+  /* ---- section rail ----------------------------------------------------------
+     A quiet vertical index in the left gutter that tracks scroll position.
+     Fraunces, light palette, active section in rust. Shown only where the
+     centered 1200px content box leaves gutter room clear of the full-bleed
+     demo window (≥1360px); below that the top nav carries navigation. */
+  .rail { display: none; }
+  @media (min-width: 1360px) {
+    .rail {
+      position: fixed; left: 24px; top: 50%; transform: translateY(-50%);
+      z-index: 6; display: flex; flex-direction: column; gap: 26px;
+      opacity: 0; transition: opacity .5s ease; pointer-events: none;
+    }
+    .rail.ready { opacity: 1; pointer-events: auto; }
+    .rail a {
+      writing-mode: vertical-rl; text-orientation: sideways;
+      font: 500 12.5px var(--serif); letter-spacing: .05em;
+      color: var(--pg-ink-3); text-decoration: none;
+      padding: 2px 0 2px 10px; border-left: 2px solid transparent;
+      transition: color .25s ease, border-color .25s ease;
+    }
+    .rail a:hover { color: var(--pg-ink-2); }
+    .rail a.is-active {
+      color: var(--accent); border-left-color: var(--accent);
+    }
+  }
+
+  /* ---- scroll reveal ---------------------------------------------------------
+     Progressive enhancement: content is visible without JS (only the .js
+     hook hides it), and motion is dropped entirely under reduced-motion. */
+  .js .reveal {
+    opacity: 0; transform: translateY(18px);
+    transition: opacity .7s ease, transform .7s cubic-bezier(.2, .7, .2, 1);
+  }
+  .js .reveal.in { opacity: 1; transform: none; }
+  /* gentle stagger down the asymmetric flow */
+  .js .flow .step:nth-child(2) { transition-delay: .07s; }
+  .js .flow .step:nth-child(3) { transition-delay: .14s; }
+  .js .figure-sub .figure:nth-child(2) { transition-delay: .08s; }
+
+  /* ---- prose sections --------------------------------------------------------- */
+  section.prose { position: relative; padding: 118px 0 0; }
   .kicker { margin: 0 0 16px; color: var(--accent); }
   section.prose h2 {
     margin: 0; font-family: var(--serif); font-weight: 480;
@@ -416,70 +461,121 @@
     line-height: 1.12; font-optical-sizing: auto;
   }
   section.prose .section-lede {
-    margin: 18px 0 0; max-width: 60ch; color: var(--pg-ink-2); font-size: 16.5px;
+    margin: 18px 0 0; max-width: 58ch; color: var(--pg-ink-2); font-size: 16.5px;
   }
 
-  /* ---- how it works ------------------------------------------------------------- */
-  .steps {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
-    margin-top: 44px;
+  /* ---- how it works ------------------------------------------------------------
+     Asymmetric flow: one wide lead card carrying the first beat, two tighter
+     cards stacked beside it. Raised warm paper, soft warm shadow, a rust
+     hairline stepping down the left of each card like a pipeline. */
+  .flow {
+    display: grid; grid-template-columns: 1.04fr 0.96fr;
+    gap: 18px 22px; margin-top: 54px; align-items: start;
   }
-  @media (max-width: 880px) { .steps { grid-template-columns: 1fr; } }
   .step {
-    position: relative; background: var(--pg-surface); border: 1px solid var(--pg-edge);
-    border-radius: 12px; padding: 22px 22px 24px;
+    position: relative; background: var(--pg-surface);
+    border: 1px solid var(--pg-edge); border-radius: 15px;
+    padding: 26px 28px 28px; box-shadow: var(--pg-shadow);
   }
+  .step-lead {
+    grid-column: 1; grid-row: 1 / span 2;
+    padding: 34px 34px 38px; box-shadow: var(--pg-shadow-lg);
+    display: flex; flex-direction: column;
+  }
+  .step::before {
+    content: ""; position: absolute; left: -1px; top: 24px; bottom: 24px;
+    width: 2px; border-radius: 2px;
+    background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent), transparent 78%));
+    opacity: .0; transition: opacity .5s ease;
+  }
+  .step.in::before, .js-off .step::before { opacity: .8; }
   .step .n {
-    font: 700 12px var(--mono); letter-spacing: .14em; color: var(--accent);
+    font: 700 12px var(--mono); letter-spacing: .16em; color: var(--accent);
   }
-  .step h3 { margin: 12px 0 8px; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
-  .step p { margin: 0; color: var(--pg-ink-2); font-size: 14.5px; line-height: 1.65; }
-  .step .n::after {
-    content: ""; display: inline-block; width: 34px; height: 1px;
-    background: var(--pg-edge-2); margin: 0 0 3px 10px;
+  .step .beat {
+    margin: 15px 0 0; color: var(--pg-ink-3);
+  }
+  .step h3 {
+    margin: 5px 0 11px; font-family: var(--serif); font-weight: 520;
+    font-size: 21px; line-height: 1.18; letter-spacing: -0.012em;
+    font-optical-sizing: auto; color: var(--pg-ink);
+  }
+  .step-lead h3 { font-size: 27px; margin-top: 6px; }
+  .step p { margin: 0; color: var(--pg-ink-2); font-size: 14.5px; line-height: 1.68; }
+  .step-lead p { font-size: 15.5px; }
+  .step-lead .grow { flex: 1; }
+  .step-lead .lead-foot {
+    margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--pg-edge);
+    color: var(--pg-ink-3); font: 400 12px/1.6 var(--mono);
+  }
+  @media (max-width: 900px) {
+    .flow { grid-template-columns: 1fr; }
+    .step-lead { grid-column: auto; grid-row: auto; }
   }
 
-  /* ---- credibility band ------------------------------------------------------------ */
-  .cred-band {
-    margin-top: 44px; border-top: 1px solid var(--pg-edge);
-    border-bottom: 1px solid var(--pg-edge);
-    display: grid; grid-template-columns: repeat(3, 1fr);
+  /* ---- the numbers: credibility centerpiece ------------------------------------
+     One dominant figure carries the section; two supporting figures sit below
+     a hairline. Numerals are mono (fixed-width), the hero figure large with a
+     scarce rust underline; plenty of air around all three. */
+  .figures { margin-top: 56px; }
+  .figure .num {
+    font-family: var(--mono); font-weight: 700; letter-spacing: -0.03em;
+    line-height: 0.98; color: var(--pg-ink);
   }
-  @media (max-width: 880px) { .cred-band { grid-template-columns: 1fr; } }
-  .stat { padding: 34px 30px 36px; border-left: 1px solid var(--pg-edge); }
-  .stat:first-child { border-left: none; padding-left: 4px; }
-  @media (max-width: 880px) {
-    .stat { border-left: none; border-top: 1px solid var(--pg-edge); padding: 26px 4px; }
-    .stat:first-child { border-top: none; }
+  .figure .num .unit {
+    font-size: .34em; font-weight: 500; letter-spacing: 0; color: var(--pg-ink-3);
   }
-  .stat .num {
-    font-size: clamp(34px, 4vw, 44px); font-weight: 700; line-height: 1.05;
-    letter-spacing: -0.01em;
+  .figure-label { margin-top: 14px; }
+  .figure p { margin: 14px 0 0; color: var(--pg-ink-2); font-size: 14.5px; line-height: 1.68; }
+  .figure p b { color: var(--pg-ink); font-weight: 600; }
+
+  .figure-hero { padding-bottom: 40px; border-bottom: 1px solid var(--pg-edge); }
+  .figure-hero .num {
+    display: inline-block; font-size: clamp(62px, 9.2vw, 122px);
+    position: relative; padding-bottom: 8px;
   }
-  .stat .num small { font-size: .48em; font-weight: 500; color: var(--pg-ink-2); letter-spacing: 0; }
-  .stat .label { margin-top: 10px; }
-  .stat p { margin: 12px 0 0; color: var(--pg-ink-2); font-size: 14px; line-height: 1.65; }
-  .cred-note { margin: 18px 4px 0; color: var(--pg-ink-3); font-size: 13px; }
+  .figure-hero .num::after {
+    content: ""; position: absolute; left: 2px; right: 30%; bottom: 0;
+    height: 3px; border-radius: 2px; background: var(--accent);
+  }
+  .figure-hero p { max-width: 66ch; font-size: 15.5px; }
+
+  .figure-sub {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 40px 56px;
+    padding-top: 40px;
+  }
+  .figure-sub .num { font-size: clamp(38px, 4.6vw, 52px); }
+  .figure-sub .num.eq { letter-spacing: -0.01em; }
+  @media (max-width: 760px) { .figure-sub { grid-template-columns: 1fr; gap: 34px; } }
+  .cred-note { margin: 30px 4px 0; color: var(--pg-ink-3); font-size: 13px; }
   .cred-note a { color: var(--pg-ink-2); }
 
-  /* ---- footer -------------------------------------------------------------------------- */
-  footer {
-    margin-top: 120px; border-top: 1px solid var(--pg-edge);
-    padding: 34px 0 46px;
-  }
+  /* ---- footer ------------------------------------------------------------------ */
+  footer { margin-top: 122px; border-top: 1px solid var(--pg-edge); padding: 44px 0 52px; }
   .foot {
-    display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+    display: flex; justify-content: space-between; gap: 40px 24px; flex-wrap: wrap;
     align-items: flex-start;
   }
-  .foot .col p { margin: 8px 0 0; color: var(--pg-ink-3); font-size: 13px; max-width: 46ch; }
-  .foot nav { display: flex; gap: 28px; flex-wrap: wrap; }
+  .foot .col { max-width: 42ch; }
+  .foot .signoff {
+    margin: 0 0 14px; font-family: var(--serif); font-weight: 460;
+    font-size: 23px; line-height: 1.22; letter-spacing: -0.01em;
+    color: var(--pg-ink); font-optical-sizing: auto;
+  }
+  .foot .signoff em { font-style: italic; color: var(--accent); }
+  .foot .col p { margin: 0; color: var(--pg-ink-3); font-size: 13px; }
+  .foot .col p a { color: var(--pg-ink-2); }
+  .foot nav { display: flex; gap: 40px; flex-wrap: wrap; }
   .foot nav a {
     display: block; font-size: 13.5px; color: var(--pg-ink-2); text-decoration: none;
-    line-height: 2;
+    line-height: 2.1;
   }
   .foot nav a:hover { color: var(--pg-ink); }
   .foot .navlabel { margin-bottom: 4px; }
-  .legal { margin-top: 30px; color: var(--pg-ink-3); font-size: 12px; max-width: 88ch; }
+  .legal {
+    margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--pg-edge);
+    color: var(--pg-ink-3); font-size: 12px; max-width: 92ch; line-height: 1.6;
+  }
 
   @media (max-width: 560px) {
     .top nav { gap: 18px; }
@@ -492,12 +588,21 @@
   @media (prefers-reduced-motion: reduce) {
     :root { --flash: transparent; }
     .live-dot { animation: none; }
+    .js .reveal { opacity: 1 !important; transform: none !important; transition: none !important; }
+    .step::before { opacity: .8 !important; }
+    .rail { transition: none !important; }
   }
 </style>
 </head>
 <body>
 <div class="atmo" aria-hidden="true"></div>
 <div class="grain" aria-hidden="true"></div>
+
+<nav class="rail" aria-label="Section navigation">
+  <a href="#stage" data-rail="stage">Live book</a>
+  <a href="#how" data-rail="how">How it works</a>
+  <a href="#numbers" data-rail="numbers">The numbers</a>
+</nav>
 
 <div class="wrap">
   <header class="top">
@@ -530,7 +635,7 @@
     </div>
   </section>
 
-  <section class="stage" aria-label="Live order book replay">
+  <section class="stage" id="stage" aria-label="Live order book replay">
     <div class="window">
       <div class="titlebar">
         <span class="traffic" aria-hidden="true"><span></span><span></span><span></span></span>
@@ -604,63 +709,80 @@
   </section>
 
   <section class="prose" id="how">
-    <p class="kicker microlabel">What you're watching</p>
-    <h2>One engine. The CLI runs it natively;<br>your browser runs it in WebAssembly.</h2>
-    <p class="section-lede">
-      There is no simulation layer and no pre-rendered data &mdash; the tab you're
-      in is doing the same work a feed handler does.
-    </p>
-    <div class="steps">
-      <div class="step">
-        <span class="n">01 / RAW BYTES</span>
+    <div class="sec-head reveal">
+      <p class="kicker microlabel">What you're watching</p>
+      <h2>One engine. The CLI runs it natively;<br>your browser runs it in WebAssembly.</h2>
+      <p class="section-lede">
+        No simulation layer, no pre-rendered data &mdash; the tab you're in does
+        the same work a feed handler does, in four steps.
+      </p>
+    </div>
+    <div class="flow">
+      <article class="step step-lead reveal">
+        <span class="n">01</span>
+        <p class="beat microlabel">Raw ITCH bytes in</p>
         <h3>The wire format, unmodified</h3>
         <p>Your browser downloads ~1.6&nbsp;MB of gzipped ITCH&nbsp;5.0 &mdash; the
-           binary format Nasdaq actually disseminates. 157,824 length-prefixed
-           messages: adds, executions, cancels, deletes, replaces.</p>
-      </div>
-      <div class="step">
-        <span class="n">02 / ONE ENGINE</span>
+           binary format Nasdaq actually disseminates &mdash; and decodes it
+           zero&#8209;copy, reading fields straight off the byte slice with no
+           intermediate allocation.</p>
+        <span class="grow" aria-hidden="true"></span>
+        <p class="lead-foot">157,824 length&#8209;prefixed messages<br>
+           adds &middot; executions &middot; cancels &middot; deletes &middot; replaces</p>
+      </article>
+      <article class="step reveal">
+        <span class="n">02</span>
+        <p class="beat microlabel">Price&#8209;time priority queue</p>
         <h3>The same Rust the CLI runs</h3>
-        <p>The bytes stream through <code>limitbook-core</code>, a
-           <code>#![no_std]</code> crate that parses zero-copy straight off the
-           byte slice &mdash; the exact crate behind the native CLI, compiled
-           unchanged to <code>wasm32-unknown-unknown</code>.</p>
-      </div>
-      <div class="step">
-        <span class="n">03 / BOOK IN YOUR TAB</span>
-        <h3>Reconstructed, then proven</h3>
-        <p>Every price level above is computed in your tab, with a deep
-           consistency check every 1,000 messages. When the replay completes,
-           the final book is compared tick-for-tick against
-           <code>limitbook replay</code>'s output for the same slice.</p>
-      </div>
+        <p>Each message mutates a limit order book kept in strict price&#8209;time
+           priority by <code>limitbook-core</code>, a <code>#![no_std]</code> crate
+           compiled unchanged to <code>wasm32-unknown-unknown</code> &mdash; the exact
+           code path behind the native CLI.</p>
+      </article>
+      <article class="step reveal">
+        <span class="n">03</span>
+        <p class="beat microlabel">Reconstructed live, then proven</p>
+        <h3>Tick&#8209;for&#8209;tick with the CLI</h3>
+        <p>Every level above is computed in your tab and deep&#8209;checked every
+           1,000 messages. At the end, the final book is compared tick&#8209;for&#8209;tick
+           against <code>limitbook replay</code> &mdash; the parity badge you see land.</p>
+      </article>
     </div>
   </section>
 
   <section class="prose" id="numbers">
-    <p class="kicker microlabel">Measured, not estimated</p>
-    <h2>The numbers behind the demo.</h2>
-    <div class="cred-band">
-      <div class="stat">
-        <div class="num mono">268.7M</div>
-        <div class="label microlabel">messages &middot; full trading day</div>
-        <p>The complete 2019-12-30 TotalView sample day &mdash; 268,744,780
-           messages &mdash; replayed through parser and book with zero invariant
-           violations and zero parse errors.</p>
+    <div class="sec-head reveal">
+      <p class="kicker microlabel">Measured, not estimated</p>
+      <h2>The numbers behind the demo.</h2>
+      <p class="section-lede">
+        Every figure here is reproducible from the repo &mdash; the same fixtures,
+        the same benchmark harness, and the same CI that guards the parity you
+        just watched.
+      </p>
+    </div>
+    <div class="figures">
+      <div class="figure figure-hero reveal">
+        <div class="num">268.7M</div>
+        <div class="figure-label microlabel">messages &middot; full trading day, zero violations</div>
+        <p>The complete 2019&#8209;12&#8209;30 TotalView sample day &mdash;
+           268,744,780 messages &mdash; replayed end to end through parser and
+           book with zero invariant violations and zero parse errors.</p>
       </div>
-      <div class="stat">
-        <div class="num mono">31.9M<small> msg/s</small></div>
-        <div class="label microlabel">zero-copy parse &middot; single core</div>
-        <p>&asymp;1&nbsp;GB/s of raw feed decoded on one Xeon core, verified by a
-           per-run timestamp checksum. Full book reconstruction included:
-           1.38M&nbsp;msg/s.</p>
-      </div>
-      <div class="stat">
-        <div class="num mono">wasm &equiv; CLI</div>
-        <div class="label microlabel">parity &middot; enforced by CI</div>
-        <p>The browser build must reproduce the CLI's final book state
-           tick-for-tick on both committed fixtures &mdash; asserted in the test
-           suite on every push, and again live at the end of the replay above.</p>
+      <div class="figure-sub">
+        <div class="figure reveal">
+          <div class="num">31.9M<span class="unit"> msg/s</span></div>
+          <div class="figure-label microlabel">zero&#8209;copy parse &middot; single core</div>
+          <p>&asymp;1&nbsp;GB/s of raw feed decoded on one Xeon core, verified by a
+             per&#8209;run timestamp checksum. <b>Full book reconstruction included:
+             1.38M&nbsp;msg/s.</b></p>
+        </div>
+        <div class="figure reveal">
+          <div class="num eq">wasm&nbsp;&equiv;&nbsp;CLI</div>
+          <div class="figure-label microlabel">parity &middot; enforced by CI</div>
+          <p>The browser build reproduces the CLI's final book state
+             tick&#8209;for&#8209;tick on both committed fixtures &mdash; asserted on
+             every push, and again live at the end of the replay above.</p>
+        </div>
       </div>
     </div>
     <p class="cred-note">
@@ -670,11 +792,13 @@
   </section>
 
   <footer>
-    <div class="foot">
+    <div class="foot reveal">
       <div class="col">
-        <a class="wordmark" href="#">LIMITBOOK<span class="tick">_</span></a>
-        <p>A zero-copy NASDAQ TotalView-ITCH 5.0 parser and limit order book
-           in <code>no_std</code> Rust.</p>
+        <p class="signoff">Real market data, <em>rebuilt honestly</em> &mdash;
+          then checked against the CLI, every push.</p>
+        <p>A zero&#8209;copy NASDAQ TotalView&#8209;ITCH&nbsp;5.0 parser and limit
+           order book in <code>no_std</code> Rust, by
+           <a href="https://github.com/AarinB1" id="author-link-2">Aarin Basu</a>.</p>
       </div>
       <nav aria-label="Footer">
         <div>
@@ -687,6 +811,7 @@
           <div class="navlabel microlabel">Author</div>
           <!-- Personal site slot: swap href + label when the site is live. -->
           <a href="https://github.com/AarinB1" id="author-link">Aarin Basu</a>
+          <a href="https://github.com/AarinB1?tab=repositories">More work&nbsp;↗</a>
         </div>
       </nav>
     </div>
@@ -698,6 +823,79 @@
     </p>
   </footer>
 </div>
+
+<script>
+  // Page-chrome interaction only — the live demo is driven entirely by
+  // main.js and shares none of this state. Progressive enhancement: the
+  // markup is fully visible without this script; it only adds reveal-on-
+  // scroll and the section rail's active tracking.
+  (function () {
+    var root = document.documentElement;
+    root.classList.add("js");
+
+    var reduce = window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var reveals = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
+
+    function showAll() { reveals.forEach(function (el) { el.classList.add("in"); }); }
+
+    if (reduce || !("IntersectionObserver" in window)) {
+      showAll();
+    } else {
+      var revObs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) {
+            e.target.classList.add("in");
+            revObs.unobserve(e.target);
+          }
+        });
+      }, { rootMargin: "0px 0px -12% 0px", threshold: 0.12 });
+      reveals.forEach(function (el) { revObs.observe(el); });
+      // Safety net: never leave content hidden if observation misfires.
+      window.addEventListener("load", function () {
+        setTimeout(function () {
+          reveals.forEach(function (el) {
+            var r = el.getBoundingClientRect();
+            if (r.top < window.innerHeight) el.classList.add("in");
+          });
+        }, 1200);
+      });
+    }
+
+    // Section rail: track which section owns the viewport and mirror it on
+    // the rail. Revealed once the reader is at or past the live demo.
+    var rail = document.querySelector(".rail");
+    if (rail && "IntersectionObserver" in window) {
+      var links = {};
+      Array.prototype.forEach.call(rail.querySelectorAll("a"), function (a) {
+        links[a.getAttribute("data-rail")] = a;
+      });
+      var ratios = { stage: 0, how: 0, numbers: 0 };
+      var ids = ["stage", "how", "numbers"];
+      var sections = ids
+        .map(function (id) { return document.getElementById(id); })
+        .filter(Boolean);
+
+      function setActive() {
+        var best = null, bestR = 0;
+        ids.forEach(function (id) {
+          if (ratios[id] > bestR) { bestR = ratios[id]; best = id; }
+        });
+        rail.classList.toggle("ready", bestR > 0);
+        Object.keys(links).forEach(function (id) {
+          links[id].classList.toggle("is-active", id === best);
+        });
+      }
+      var spy = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.target.id in ratios) ratios[e.target.id] = e.intersectionRatio;
+        });
+        setActive();
+      }, { threshold: [0, 0.15, 0.35, 0.6, 0.85] });
+      sections.forEach(function (s) { spy.observe(s); });
+    }
+  })();
+</script>
 <script type="module" src="main.js"></script>
 </body>
 </html>
