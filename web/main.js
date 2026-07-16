@@ -48,6 +48,8 @@ const SPEEDS = [
 ];
 const TAPE_KEEP = 200; // prints retained per symbol
 const SPARK_EVERY = 100; // sample mid price at most every N messages
+const DEPTH_LEVELS = 180; // price levels per side fed to the depth chart
+const DEPTH_WINDOW = 0.0025; // depth-chart half-window as a fraction of mid
 
 const $ = (id) => document.getElementById(id);
 const MONO = getComputedStyle(document.documentElement)
@@ -55,7 +57,7 @@ const MONO = getComputedStyle(document.documentElement)
   .trim();
 const COLOR = {};
 for (const key of ["surface-2", "edge", "ink", "ink-2", "ink-3", "bid", "ask",
-  "bid-ink", "ask-ink", "accent", "flash"]) {
+  "bid-ink", "ask-ink", "accent", "accent-ink", "flash"]) {
   COLOR[key] = getComputedStyle(document.documentElement)
     .getPropertyValue(`--${key}`)
     .trim();
@@ -161,6 +163,16 @@ async function main() {
   let sparkLastSample = -Infinity;
   let tapeDirty = true;
 
+  // Queue inspector state. The panel shows one price level's FIFO queue:
+  // by default the best bid ("top", auto-follows), or a level pinned by
+  // clicking the ladder ("pin"), or the level of a tracked order ("order").
+  let queueSel = { mode: "top" };
+  // Tracked resting order, or null. ref is a BigInt (order reference
+  // numbers are u64 and cross the wasm boundary exactly); pos is the last
+  // order_position readback; fate is set once the order leaves the book.
+  // Order refs are deterministic in the stream, so tracking survives seeks.
+  let tracked = null;
+
   function freshEngine(withPrime = true) {
     engine?.free();
     engine = new Engine(bytes, VERIFY_EVERY);
@@ -168,6 +180,16 @@ async function main() {
     for (const arr of spark.values()) arr.length = 0;
     sparkLastSample = -Infinity;
     tapeDirty = true;
+    if (tracked) {
+      // Re-arm the watch on the fresh engine and re-derive the order's
+      // state from the stream (a backward seek can resurrect it).
+      engine.watch(tracked.ref);
+      tracked.last = null;
+      tracked.fate = null;
+      tracked.pos = null;
+      tracked.lastLevel = null;
+      tracked.replaced = false;
+    }
     $("verdict").style.display = "none";
     delete window.__limitbook_verdict;
     if (withPrime) prime();
@@ -235,6 +257,8 @@ async function main() {
       selected = locates[s];
       tapeDirty = true;
       resetLadderState();
+      resetQueueState(); // orders belong to one book; tracking doesn't cross
+      resetDepthState();
       [...tabs.children].forEach((c, j) =>
         c.setAttribute("aria-pressed", String(locates[SYMBOLS[j]] === selected)),
       );
@@ -255,6 +279,7 @@ async function main() {
     if (rebuilt) {
       freshEngine(false);
       resetLadderState();
+      resetDepthState();
     }
     // Drop mid-price history past the new position, then fast-forward in
     // chunks, sampling as we go so the chart shows the path just skipped.
@@ -266,6 +291,7 @@ async function main() {
       sampleSpark();
     }
     drainTape();
+    drainWatchEvents();
     sparkLastSample = -Infinity; // force a sample at the new position
     sampleSpark();
     simClock = engine.clock_ns();
@@ -288,6 +314,8 @@ async function main() {
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       const delta = (e.key === "ArrowLeft" ? -1 : 1) * Math.round(EXPECTED.messages / 20);
       pendingSeek = Math.max(0, Math.min(EXPECTED.messages, engine.messages() + delta));
+    } else if (e.key === "Escape") {
+      resetQueueState(); // untrack + back to following the top of book
     }
   });
 
@@ -447,6 +475,27 @@ async function main() {
     };
     side(nBid, bidBase, -1, COLOR.bid, COLOR["bid-ink"]);
     side(nAsk, askBase, +1, COLOR.ask, COLOR["ask-ink"]);
+    // Geometry for click hit-testing (click a row = inspect its queue).
+    ladderLayout = { top, rowH, mid, snap, nBid, nAsk };
+    // Pinned-level cue: a hairline bracket on the inspected row.
+    if (queueSel.mode !== "top") {
+      const lvl = inspectedLevel();
+      if (lvl) {
+        const base = lvl.bid ? bidBase : askBase;
+        const n = lvl.bid ? nBid : nAsk;
+        for (let row = 0; row < Math.min(n, DEPTH); row++) {
+          if (snap[base + 3 * row] === lvl.price) {
+            const y0 = top + row * rowH;
+            ctx.strokeStyle = COLOR["accent-ink"];
+            ctx.globalAlpha = 0.8;
+            ctx.strokeRect(
+              lvl.bid ? 8.5 : mid + 3.5, y0 + 1.5, mid - 11.5, rowH - 3);
+            ctx.globalAlpha = 1;
+            break;
+          }
+        }
+      }
+    }
     prevShares = nextShares;
     for (const k of barLen.keys()) if (!nextShares.has(k)) barLen.delete(k);
     if (flashAt.size > 400) {
@@ -492,6 +541,395 @@ async function main() {
     ctx.textBaseline = "top";
     ctx.fillText(`mid ${fmtPrice(Math.round(lo))} – ${fmtPrice(Math.round(hi))}`, 14, 4);
   }
+
+  // --- queue panel: price-time priority, made visible -----------------------
+
+  const QUEUE_HINT =
+    "click a ladder price to inspect its queue · click an order to track " +
+    "its place in line · esc resets";
+  let ladderLayout = null; // last ladder draw geometry, for click hit-tests
+  let queueHits = []; // row hit boxes from the last queue draw: {y0, y1, ref}
+  let queueNoteHtml = null; // cache so the DOM is only touched on change
+
+  function resetQueueState() {
+    queueSel = { mode: "top" };
+    if (tracked) engine.unwatch();
+    tracked = null;
+  }
+
+  function track(ref) {
+    tracked = { ref, last: null, fate: null, pos: null, lastLevel: null,
+      replaced: false };
+    engine.watch(ref);
+    queueSel = { mode: "order" };
+  }
+
+  function untrack() {
+    engine.unwatch();
+    tracked = null;
+    if (queueSel.mode === "order") queueSel = { mode: "top" };
+  }
+
+  function fmtRef(ref) {
+    return `…${String(ref % 100000n).padStart(5, "0")}`;
+  }
+
+  // Drains fate events for the tracked order (5-slot records, see
+  // Engine::take_watch_events) and re-reads its position. The engine
+  // follows replaces to the successor ref on its side; mirror that here.
+  function drainWatchEvents() {
+    if (!tracked) return;
+    const ev = engine.take_watch_events();
+    for (let i = 0; i < ev.length; i += 5) {
+      const kind = ev[i];
+      if (kind === 4) {
+        tracked.ref = (BigInt(ev[i + 3]) << 32n) | BigInt(ev[i + 4]);
+        tracked.replaced = true;
+      }
+      tracked.last = { kind, qty: ev[i + 1], t: ev[i + 2] };
+    }
+    const pos = engine.order_position(tracked.ref);
+    if (pos.length) {
+      tracked.pos = pos;
+      tracked.fate = null;
+      tracked.lastLevel = { bid: pos[1] === 1, price: pos[0] };
+    } else {
+      tracked.pos = null;
+      // Only a witnessed event assigns a fate; with none the order simply
+      // isn't in the book at this position (e.g. after a backward seek).
+      if (!tracked.fate && tracked.last) {
+        tracked.fate = {
+          label: tracked.last.kind === 1 ? "FILLED" : "CANCELLED",
+          t: tracked.last.t,
+        };
+      }
+    }
+  }
+
+  /// The level the queue panel shows right now.
+  function inspectedLevel() {
+    if (queueSel.mode === "pin") return { bid: queueSel.bid, price: queueSel.price };
+    if (queueSel.mode === "order" && tracked && tracked.lastLevel) {
+      return tracked.lastLevel;
+    }
+    const snap = engine.snapshot(selected, 1);
+    if (snap[0] === 0) return null;
+    return { bid: true, price: snap[2] };
+  }
+
+  function queueNote() {
+    if (!tracked) return QUEUE_HINT;
+    const short = fmtRef(tracked.ref);
+    if (tracked.fate) {
+      return `<b>${short} ${tracked.fate.label}</b> at ${fmtClock(tracked.fate.t)} — esc resets`;
+    }
+    if (!tracked.pos) return `tracking ${short} — not in book at this position`;
+    const [, , , rank, ahead, len] = tracked.pos;
+    if (rank === 0) return `tracking <b>${short} · FRONT OF QUEUE</b> · first of ${len} in line`;
+    return (
+      `tracking <b>${short}</b> · #${rank + 1} of ${len} · ` +
+      `${ahead.toLocaleString()} sh ahead` +
+      (tracked.replaced ? " · priority reset by replace" : "")
+    );
+  }
+
+  function drawQueue() {
+    const [ctx, W, H] = sizeCanvas($("queue"));
+    ctx.clearRect(0, 0, W, H);
+    queueHits = [];
+
+    const note = queueNote();
+    if (note !== queueNoteHtml) {
+      queueNoteHtml = note;
+      $("queue-note").innerHTML = note;
+    }
+
+    const level = inspectedLevel();
+    if (!level) {
+      $("queue-level").textContent = "–";
+      return;
+    }
+    const flat = engine.level_queue(selected, level.bid, level.price);
+    const n = flat.length / 2;
+    let total = 0;
+    for (let i = 0; i < n; i++) total += Number(flat[2 * i + 1]);
+    $("queue-level").textContent =
+      `${queueSel.mode === "top" ? "top · " : ""}${level.bid ? "BID" : "ASK"} ` +
+      `${fmtPrice(level.price)} · ${n} × ${total.toLocaleString()} sh`;
+
+    const pad = 14;
+    if (n === 0) {
+      ctx.font = `400 11.5px ${MONO}`;
+      ctx.fillStyle = COLOR["ink-3"];
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("no resting orders at this level", W / 2, 56);
+      return;
+    }
+    const barColor = level.bid ? COLOR.bid : COLOR.ask;
+    const inkColor = level.bid ? COLOR["bid-ink"] : COLOR["ask-ink"];
+
+    // The line itself: one segment per order, width ∝ shares, front of the
+    // queue at the left. Gaps keep individual orders readable as segments.
+    const barY = 10;
+    const barH = 16;
+    const gap = n > 48 ? 0.5 : 1;
+    const usable = W - 2 * pad - gap * (n - 1);
+    let x = pad;
+    for (let i = 0; i < n; i++) {
+      const isTracked = tracked && !tracked.fate && flat[2 * i] === tracked.ref;
+      const w = Math.max(1, (Number(flat[2 * i + 1]) / total) * usable);
+      ctx.fillStyle = isTracked ? COLOR.accent : barColor;
+      ctx.globalAlpha = isTracked ? 0.95 : i === 0 ? 0.6 : 0.32;
+      ctx.fillRect(x, barY, w, barH);
+      x += w + gap;
+    }
+    ctx.globalAlpha = 1;
+
+    // Column headings, ladder-style.
+    const headY = barY + barH + 16;
+    ctx.textBaseline = "middle";
+    ctx.font = `600 10px ${MONO}`;
+    ctx.fillStyle = COLOR["ink-3"];
+    ctx.textAlign = "left";
+    ctx.fillText("#", pad, headY);
+    ctx.fillText("ORDER", pad + 26, headY);
+    ctx.textAlign = "right";
+    ctx.fillText("SIZE", W - pad - 64, headY);
+    ctx.fillText("CUM", W - pad, headY);
+
+    // Rows in time priority with cumulative shares. When the tracked order
+    // sits deeper than the window, scroll it into view and elide around it.
+    const rowsTop = headY + 14;
+    const rowH = 21;
+    const visible = Math.max(2, Math.floor((H - rowsTop - 6) / rowH));
+    const trackedRank =
+      tracked && !tracked.fate && tracked.pos && queueSel.mode === "order"
+        ? tracked.pos[3]
+        : -1;
+    let start = 0;
+    if (trackedRank >= visible - 2) {
+      start = Math.min(Math.max(0, n - visible + 1),
+        trackedRank - Math.floor(visible / 2));
+    }
+    let end = Math.min(n, start + visible - (start > 0 ? 1 : 0));
+    if (end < n) end = Math.min(n, end) - 1; // reserve a slot for the tail
+    let cum = 0;
+    for (let i = 0; i < start; i++) cum += Number(flat[2 * i + 1]);
+    let y = rowsTop + rowH / 2;
+    ctx.font = `400 10.5px ${MONO}`;
+    if (start > 0) {
+      ctx.fillStyle = COLOR["ink-3"];
+      ctx.textAlign = "left";
+      ctx.fillText(`⋯ ${start} ahead · ${cum.toLocaleString()} sh`, pad, y);
+      y += rowH;
+    }
+    for (let i = start; i < end; i++) {
+      const ref = flat[2 * i];
+      const shares = Number(flat[2 * i + 1]);
+      cum += shares;
+      const isTracked = tracked && !tracked.fate && ref === tracked.ref;
+      if (isTracked) {
+        ctx.globalAlpha = 0.14;
+        ctx.fillStyle = COLOR.accent;
+        ctx.fillRect(6, y - rowH / 2 + 1, W - 12, rowH - 2);
+        ctx.globalAlpha = 1;
+      }
+      ctx.font = `${i === 0 ? "700" : "400"} 11.5px ${MONO}`;
+      ctx.textAlign = "left";
+      ctx.fillStyle = i === 0 ? inkColor : COLOR["ink-3"];
+      ctx.fillText(String(i + 1).padStart(2, "0"), pad, y);
+      ctx.fillStyle = isTracked ? COLOR["accent-ink"] : COLOR.ink;
+      ctx.fillText(fmtRef(ref), pad + 26, y);
+      ctx.textAlign = "right";
+      ctx.fillStyle = COLOR["ink-2"];
+      ctx.fillText(shares.toLocaleString(), W - pad - 64, y);
+      ctx.fillStyle = COLOR["ink-3"];
+      ctx.fillText(cum.toLocaleString(), W - pad, y);
+      queueHits.push({ y0: y - rowH / 2, y1: y + rowH / 2, ref });
+      y += rowH;
+    }
+    if (end < n) {
+      ctx.font = `400 10.5px ${MONO}`;
+      ctx.fillStyle = COLOR["ink-3"];
+      ctx.textAlign = "left";
+      ctx.fillText(
+        `⋯ ${n - end} behind · ${(total - cum).toLocaleString()} sh`, pad, y);
+    }
+  }
+
+  // --- cumulative depth chart ------------------------------------------------
+
+  let depthMid = 0; // eased center of the price window (ticks)
+  let depthHalf = 0; // eased half-width of the price window (ticks)
+  let depthMax = 0; // eased cumulative-shares scale
+  let depthHover = null; // hover x in CSS px, or null
+  let depthLabelText = null;
+
+  function resetDepthState() {
+    depthMid = 0;
+    depthHalf = 0;
+    depthMax = 0;
+  }
+
+  function drawDepth() {
+    const [ctx, W, H] = sizeCanvas($("depth"));
+    ctx.clearRect(0, 0, W, H);
+    const snap = engine.snapshot(selected, DEPTH_LEVELS);
+    const nBid = snap[0];
+    const nAsk = snap[1];
+    if (nBid === 0 || nAsk === 0) {
+      if (depthLabelText !== "–") $("depth-label").textContent = depthLabelText = "–";
+      return;
+    }
+    const bb = snap[2];
+    const ba = snap[2 + 3 * nBid];
+    const mid = (bb + ba) / 2;
+    // Price window around the mid, eased so the frame doesn't jump; the
+    // scale eases the same way the ladder's does (exact under reduced
+    // motion, where SCALE_EASE is 1).
+    const targetHalf = Math.max(mid * DEPTH_WINDOW, (ba - bb) * 2, 400);
+    depthMid = depthMid > 0 ? depthMid + (mid - depthMid) * SCALE_EASE : mid;
+    depthHalf = depthHalf > 0 ? depthHalf + (targetHalf - depthHalf) * SCALE_EASE : targetHalf;
+    const lo = depthMid - depthHalf;
+    const hi = depthMid + depthHalf;
+
+    // Step curves: cumulative resting shares from the touch outward, per
+    // side, clipped to the window. The curve only extends flat to the
+    // window edge when the book is truly exhausted inside it — a curve cut
+    // off by the DEPTH_LEVELS cap stops at the last known level instead of
+    // fabricating depth.
+    const curve = (base, count, ask) => {
+      const pts = [];
+      let cum = 0;
+      for (let i = 0; i < count; i++) {
+        const price = snap[base + 3 * i];
+        if (ask ? price > hi : price < lo) {
+          pts.push([ask ? hi : lo, cum]);
+          return pts;
+        }
+        cum += snap[base + 3 * i + 1];
+        pts.push([price, cum]);
+      }
+      if (count < DEPTH_LEVELS && pts.length) pts.push([ask ? hi : lo, cum]);
+      return pts;
+    };
+    const bids = curve(2, nBid, false);
+    const asks = curve(2 + 3 * nBid, nAsk, true);
+    const worst = Math.max(bids[bids.length - 1][1], asks[asks.length - 1][1], 1);
+    depthMax = depthMax > 0 ? depthMax + (worst - depthMax) * SCALE_EASE : worst;
+    const yMax = Math.max(depthMax, worst) * 1.06; // never clip the curve
+
+    const padX = 14;
+    const top = 18;
+    const bottom = 18;
+    const x = (p) => padX + ((p - lo) / (hi - lo)) * (W - 2 * padX);
+    const y = (c) => top + (1 - c / yMax) * (H - top - bottom);
+
+    // Mid marker first, under the curves.
+    ctx.fillStyle = COLOR.edge;
+    ctx.fillRect(x(mid), top - 6, 1, H - top - bottom + 12);
+
+    const side = (pts, color, ink) => {
+      const path = new Path2D();
+      let curY = y(0);
+      let lastX = x(pts[0][0]);
+      path.moveTo(lastX, curY);
+      for (const [p, c] of pts) {
+        lastX = x(p);
+        path.lineTo(lastX, curY);
+        curY = y(c);
+        path.lineTo(lastX, curY);
+      }
+      const fill = new Path2D(path);
+      fill.lineTo(lastX, y(0));
+      fill.closePath();
+      ctx.globalAlpha = 0.13;
+      ctx.fillStyle = color;
+      ctx.fill(fill);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = 1.6;
+      ctx.lineJoin = "round";
+      ctx.stroke(path);
+    };
+    side(bids, COLOR.bid, COLOR["bid-ink"]);
+    side(asks, COLOR.ask, COLOR["ask-ink"]);
+
+    // Direct side labels (identity is never color-alone) + price scale.
+    ctx.textBaseline = "middle";
+    ctx.font = `600 10px ${MONO}`;
+    ctx.textAlign = "left";
+    ctx.fillStyle = COLOR["bid-ink"];
+    ctx.fillText("BID", padX, 9);
+    ctx.fillStyle = COLOR["ink-3"];
+    ctx.fillText(fmtPrice(Math.round(lo)), padX, H - 8);
+    ctx.textAlign = "right";
+    ctx.fillStyle = COLOR["ask-ink"];
+    ctx.fillText("ASK", W - padX, 9);
+    ctx.fillStyle = COLOR["ink-3"];
+    ctx.fillText(fmtPrice(Math.round(hi)), W - padX, H - 8);
+    ctx.textAlign = "center";
+    ctx.fillText(`mid ${fmtPrice(Math.round(mid))}`, x(mid), H - 8);
+
+    // Hover readout: price + cumulative shares at the cursor.
+    if (depthHover !== null && depthHover >= padX && depthHover <= W - padX) {
+      const price = lo + ((depthHover - padX) / (W - 2 * padX)) * (hi - lo);
+      const bidSide = price <= mid;
+      const pts = bidSide ? bids : asks;
+      let cumAt = 0;
+      for (const [p, c] of pts) {
+        if (bidSide ? p >= price : p <= price) cumAt = c;
+        else break;
+      }
+      ctx.fillStyle = COLOR.edge;
+      ctx.fillRect(depthHover, top - 4, 1, H - top - bottom + 8);
+      ctx.font = `400 10.5px ${MONO}`;
+      ctx.fillStyle = COLOR.ink;
+      ctx.textAlign = depthHover > W / 2 ? "right" : "left";
+      const tx = depthHover + (depthHover > W / 2 ? -6 : 6);
+      const inSpread = price > bb && price < ba;
+      ctx.fillText(
+        inSpread
+          ? `${fmtPrice(Math.round(price))} · inside spread`
+          : `${fmtPrice(Math.round(price))} · ${fmtCount(cumAt)} sh`,
+        tx, 9);
+    }
+
+    const label = `${SYMBOLS.find((s) => locates[s] === selected)} · mid ±` +
+      `${((depthHalf / depthMid) * 100).toFixed(2)}%`;
+    if (label !== depthLabelText) {
+      depthLabelText = label;
+      $("depth-label").textContent = label;
+    }
+  }
+
+  // --- queue + depth interaction ---------------------------------------------
+
+  $("ladder").addEventListener("click", (e) => {
+    if (!ladderLayout) return;
+    const { top, rowH, mid, snap, nBid, nAsk } = ladderLayout;
+    const row = Math.floor((e.offsetY - top) / rowH);
+    if (row < 0 || row >= DEPTH) return;
+    const bid = e.offsetX < mid;
+    if (row >= (bid ? nBid : nAsk)) return;
+    const price = snap[(bid ? 2 : 2 + 3 * nBid) + 3 * row];
+    if (queueSel.mode === "pin" && queueSel.bid === bid && queueSel.price === price) {
+      queueSel = { mode: "top" }; // clicking the pinned row unpins
+    } else {
+      queueSel = { mode: "pin", bid, price };
+    }
+  });
+
+  $("queue").addEventListener("click", (e) => {
+    const hit = queueHits.find((h) => e.offsetY >= h.y0 && e.offsetY < h.y1);
+    if (!hit) return;
+    if (tracked && hit.ref === tracked.ref) untrack();
+    else track(hit.ref);
+  });
+
+  $("depth").addEventListener("mousemove", (e) => (depthHover = e.offsetX));
+  $("depth").addEventListener("mouseleave", () => (depthHover = null));
 
   function renderTape() {
     if (!tapeDirty) return;
@@ -636,10 +1074,13 @@ async function main() {
     }
     lastFrame = now;
 
+    drainWatchEvents();
     renderStats();
     renderTape();
     drawLadder();
     drawSpark();
+    drawQueue();
+    drawDepth();
     requestAnimationFrame(frame);
   }
 
@@ -658,6 +1099,25 @@ async function main() {
     pendingSeek = m;
   };
   window.__limitbook_setSpeed = (i) => speedBox.children[i].click();
+  // Queue-view hooks for the headless end-to-end check: the displayed FIFO
+  // queue read straight from the engine, and the inspector's state.
+  window.__limitbook_queue = (bid, price) =>
+    Array.from(engine.level_queue(selected, bid, price), (v) => v.toString());
+  window.__limitbook_inspect = () => {
+    const level = inspectedLevel();
+    return {
+      mode: queueSel.mode,
+      level: level ? { bid: level.bid, price: level.price } : null,
+      tracked: tracked
+        ? {
+            ref: tracked.ref.toString(),
+            rank: tracked.pos ? tracked.pos[3] : -1,
+            fate: tracked.fate ? tracked.fate.label : null,
+          }
+        : null,
+      rows: queueHits.map((h) => h.ref.toString()),
+    };
+  };
   window.__limitbook_ready = true;
 
   // Open mid-window so the first paint is a fully built book, then run at

@@ -329,10 +329,17 @@
 
   /* ---- board ------------------------------------------------------------- */
   .board {
-    display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px;
+    display: grid; grid-template-columns: minmax(0, 1fr) 262px 300px; gap: 12px;
     margin-bottom: 12px;
   }
-  @media (max-width: 880px) { .board { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 1120px) {
+    .board { grid-template-columns: 1fr 1fr; }
+    .board .panel:first-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 680px) {
+    .board { grid-template-columns: minmax(0, 1fr); }
+    .board .panel:first-child { grid-column: auto; }
+  }
   .panel {
     background: var(--surface-2); border: 1px solid var(--edge);
     border-radius: 9px; overflow: hidden;
@@ -355,7 +362,19 @@
 
   canvas { display: block; width: 100%; }
   #spark { height: 62px; }
-  #ladder { height: 420px; }
+  #ladder { height: 420px; cursor: pointer; }
+
+  /* ---- queue (price-time priority) + cumulative depth --------------------- */
+  #queue { height: 500px; cursor: pointer; }
+  /* stacked single-column: don't leave a tall dead canvas under short queues */
+  @media (max-width: 680px) { #queue { height: 320px; } }
+  #queue-note {
+    padding: 6px 14px 0; font-size: 11px; line-height: 1.5;
+    color: var(--ink-3); min-height: 28px;
+  }
+  #queue-note b { color: var(--accent-ink); font-weight: 600; }
+  .panel.depth { margin-bottom: 12px; }
+  #depth { height: 148px; }
 
   /* ---- tape ---------------------------------------------------------------- */
   #tape { padding: 4px 0 8px; height: 532px; overflow: hidden; }
@@ -677,11 +696,27 @@
           </div>
           <div class="panel">
             <div class="head">
+              <span class="microlabel">queue &middot; price&#8209;time</span>
+              <span class="microlabel" id="queue-level">&ndash;</span>
+            </div>
+            <div id="queue-note"></div>
+            <canvas id="queue"></canvas>
+          </div>
+          <div class="panel">
+            <div class="head">
               <span class="microlabel">time &amp; sales</span>
               <span class="microlabel" id="tape-sym"></span>
             </div>
             <div id="tape"></div>
           </div>
+        </div>
+
+        <div class="panel depth">
+          <div class="head">
+            <span class="microlabel">cumulative depth</span>
+            <span class="microlabel" id="depth-label">&ndash;</span>
+          </div>
+          <canvas id="depth"></canvas>
         </div>
 
         <div class="strip">
@@ -703,7 +738,8 @@
     </div>
     <p class="stage-caption">
       <span><kbd>space</kbd> play/pause &nbsp;·&nbsp; <kbd>1</kbd>&ndash;<kbd>5</kbd> speed
-        &nbsp;·&nbsp; <kbd>←</kbd><kbd>→</kbd> seek</span>
+        &nbsp;·&nbsp; <kbd>←</kbd><kbd>→</kbd> seek &nbsp;·&nbsp; click a price to inspect
+        its queue, an order to track it, <kbd>esc</kbd> to reset</span>
       <span>every number on screen is read back out of the engine</span>
     </p>
   </section>
