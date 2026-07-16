@@ -187,6 +187,8 @@ async function main() {
       tracked.last = null;
       tracked.fate = null;
       tracked.pos = null;
+      tracked.lastLevel = null;
+      tracked.replaced = false;
     }
     $("verdict").style.display = "none";
     delete window.__limitbook_verdict;
