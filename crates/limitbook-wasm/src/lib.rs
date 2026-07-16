@@ -13,7 +13,7 @@
 //! the caller's job.
 
 use limitbook_core::frame::Messages;
-use limitbook_core::parse::{Message, Side, decode, trim_padding};
+use limitbook_core::parse::{Message, Price4, Side, decode, trim_padding};
 use limitbook_core::replay::Replay;
 use wasm_bindgen::prelude::*;
 
@@ -34,6 +34,13 @@ pub struct Engine {
     /// Time-and-sales prints accumulated since the last `take_tape` call;
     /// see [`Engine::take_tape`] for the record layout.
     tape: Vec<f64>,
+    /// Order reference the queue-position tracker is following, if any.
+    /// Watching only appends to `watch_events` — it never feeds the engine,
+    /// so replay state and CLI parity are untouched.
+    watched: Option<u64>,
+    /// Fate events for the watched order since the last `take_watch_events`
+    /// call; see [`Engine::take_watch_events`] for the record layout.
+    watch_events: Vec<f64>,
     replay: Replay,
 }
 
@@ -88,6 +95,35 @@ fn record_print(replay: &Replay, tape: &mut Vec<f64>, payload: &[u8], clock: u64
     ]);
 }
 
+/// Appends a fate event to `events` when an order-mutation payload (types
+/// E/C/X/D/U) references the watched order. Record layout (5 slots):
+/// `(kind, qty, clock_ns, new_ref_hi, new_ref_lo)` where kind is 1 executed,
+/// 2 cancelled, 3 deleted, 4 replaced; qty is the shares executed/cancelled
+/// (the new total for a replace); the new-ref halves are nonzero only for a
+/// replace and split the 64-bit successor reference so it crosses the f64
+/// boundary exactly.
+fn record_watch(watched: u64, events: &mut Vec<f64>, payload: &[u8], clock: u64) {
+    let Ok(msg) = decode(payload) else { return };
+    let (order_ref, kind, qty, new_ref) = match msg {
+        Message::OrderExecuted(m) => (m.order_ref, 1.0, m.executed_shares, 0),
+        Message::OrderExecutedWithPrice(m) => (m.order_ref, 1.0, m.executed_shares, 0),
+        Message::OrderCancel(m) => (m.order_ref, 2.0, m.cancelled_shares, 0),
+        Message::OrderDelete(m) => (m.order_ref, 3.0, 0, 0),
+        Message::OrderReplace(m) => (m.original_order_ref, 4.0, m.shares, m.new_order_ref),
+        _ => return,
+    };
+    if order_ref != watched {
+        return;
+    }
+    events.extend_from_slice(&[
+        kind,
+        f64::from(qty),
+        clock as f64,
+        (new_ref >> 32) as f64,
+        (new_ref & 0xffff_ffff) as f64,
+    ]);
+}
+
 /// Timestamp from the uniform header: offset 5, 6 bytes big-endian, ns
 /// since midnight (spec/itch50_spec.txt; every framed payload is at least
 /// 11 bytes).
@@ -111,6 +147,8 @@ impl Engine {
             finished: false,
             clock: 0,
             tape: Vec::new(),
+            watched: None,
+            watch_events: Vec::new(),
             replay: Replay::new(u64::from(verify_every)),
         }
     }
@@ -130,6 +168,11 @@ impl Engine {
                     self.clock = header_timestamp(payload);
                     if matches!(payload[0], b'E' | b'C' | b'P') {
                         record_print(&self.replay, &mut self.tape, payload, self.clock);
+                    }
+                    if let Some(watched) = self.watched
+                        && matches!(payload[0], b'E' | b'C' | b'X' | b'D' | b'U')
+                    {
+                        record_watch(watched, &mut self.watch_events, payload, self.clock);
                     }
                     self.replay.feed(payload);
                     fed += 1;
@@ -233,6 +276,75 @@ impl Engine {
             out[i] = n;
         }
         out
+    }
+
+    /// The FIFO queue at one price level, in time priority (first in line
+    /// first), as flat `(order_ref, shares)` pairs — a `BigUint64Array` on
+    /// the JS side, so 64-bit order reference numbers cross the boundary
+    /// exactly and stay usable as identities. `bid` selects the side;
+    /// prices are raw Price(4) ticks. Empty if the level does not exist.
+    /// Read-only over already-computed book state.
+    pub fn level_queue(&self, locate: u16, bid: bool, price_ticks: u32) -> Vec<u64> {
+        let side = if bid { Side::Buy } else { Side::Sell };
+        let mut out = Vec::new();
+        for (order_ref, shares) in self
+            .replay
+            .market()
+            .queue_at(locate, side, Price4(price_ticks))
+        {
+            out.push(order_ref);
+            out.push(u64::from(shares));
+        }
+        out
+    }
+
+    /// A live order's current book position, for the tracking overlay:
+    /// `[price_ticks, is_bid, shares, rank, shares_ahead, queue_len,
+    /// level_shares]` (rank = orders ahead of it in its level's queue, 0 =
+    /// front of the line). Empty if the reference is not live. Read-only.
+    pub fn order_position(&self, order_ref: u64) -> Vec<f64> {
+        let market = self.replay.market();
+        let Some(order) = market.order(order_ref) else {
+            return Vec::new();
+        };
+        let Some((rank, shares_ahead)) = market.queue_position(order_ref) else {
+            return Vec::new();
+        };
+        let Some(book) = market.book(order.stock_locate) else {
+            return Vec::new();
+        };
+        let queue_len = book.orders_at(order.side, order.price).count();
+        let level_shares = book.shares_at(order.side, order.price).unwrap_or(0);
+        vec![
+            f64::from(order.price.0),
+            if order.side == Side::Buy { 1.0 } else { 0.0 },
+            f64::from(order.shares),
+            rank as f64,
+            shares_ahead as f64,
+            queue_len as f64,
+            level_shares as f64,
+        ]
+    }
+
+    /// Starts recording fate events for one order reference (there is at
+    /// most one watched order). Watching is presentation state only: it
+    /// never mutates the book or alters replay output.
+    pub fn watch(&mut self, order_ref: u64) {
+        self.watched = Some(order_ref);
+        self.watch_events.clear();
+    }
+
+    /// Stops watching and drops any undrained events.
+    pub fn unwatch(&mut self) {
+        self.watched = None;
+        self.watch_events.clear();
+    }
+
+    /// Drains fate events for the watched order accumulated since the last
+    /// call, as flat 5-element records — see [`record_watch`] for the
+    /// layout.
+    pub fn take_watch_events(&mut self) -> Vec<f64> {
+        core::mem::take(&mut self.watch_events)
     }
 }
 

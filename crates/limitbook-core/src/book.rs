@@ -618,6 +618,48 @@ impl Market {
         self.orders.get(&order_ref)
     }
 
+    /// The FIFO queue at one price level, in time priority (first in line
+    /// first), as (order reference number, remaining shares). Empty if the
+    /// level does not exist. Read-only: joins the level queue with the live
+    /// order map and never touches book state.
+    pub fn queue_at(
+        &self,
+        locate: u16,
+        side: Side,
+        price: Price4,
+    ) -> impl Iterator<Item = (u64, u32)> + '_ {
+        self.books
+            .get(&locate)
+            .into_iter()
+            .flat_map(move |book| book.orders_at(side, price))
+            .filter_map(|order_ref| {
+                // Every queued reference is live ([`Self::verify`] proves
+                // it); a miss here would be a book bug, not a caller error.
+                let order = self.orders.get(&order_ref);
+                debug_assert!(order.is_some(), "queued order {order_ref} not live");
+                order.map(|o| (order_ref, o.shares))
+            })
+    }
+
+    /// A live order's position in its price level's FIFO queue as
+    /// (orders ahead, shares ahead): (0, 0) means it is first in line.
+    /// `None` if the order is not live. Read-only.
+    pub fn queue_position(&self, order_ref: u64) -> Option<(usize, u64)> {
+        let order = self.orders.get(&order_ref)?;
+        let mut shares_ahead = 0u64;
+        for (ahead, (queued, shares)) in self
+            .queue_at(order.stock_locate, order.side, order.price)
+            .enumerate()
+        {
+            if queued == order_ref {
+                return Some((ahead, shares_ahead));
+            }
+            shares_ahead += u64::from(shares);
+        }
+        debug_assert!(false, "live order {order_ref} not queued at its level");
+        None
+    }
+
     /// Total live orders across all books.
     pub fn live_orders(&self) -> usize {
         self.orders.len()
