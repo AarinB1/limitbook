@@ -102,19 +102,22 @@ fn record_print(replay: &Replay, tape: &mut Vec<f64>, payload: &[u8], clock: u64
 /// (the new total for a replace); the new-ref halves are nonzero only for a
 /// replace and split the 64-bit successor reference so it crosses the f64
 /// boundary exactly.
-fn record_watch(watched: u64, events: &mut Vec<f64>, payload: &[u8], clock: u64) {
-    let Ok(msg) = decode(payload) else { return };
-    let (order_ref, kind, qty, new_ref) = match msg {
-        Message::OrderExecuted(m) => (m.order_ref, 1.0, m.executed_shares, 0),
-        Message::OrderExecutedWithPrice(m) => (m.order_ref, 1.0, m.executed_shares, 0),
-        Message::OrderCancel(m) => (m.order_ref, 2.0, m.cancelled_shares, 0),
-        Message::OrderDelete(m) => (m.order_ref, 3.0, 0, 0),
-        Message::OrderReplace(m) => (m.original_order_ref, 4.0, m.shares, m.new_order_ref),
-        _ => return,
+fn record_watch(watched: u64, events: &mut Vec<f64>, payload: &[u8], clock: u64) -> Option<u64> {
+    let Ok(msg) = decode(payload) else {
+        return None;
+    };
+    let (order_ref, kind, qty, successor) = match msg {
+        Message::OrderExecuted(m) => (m.order_ref, 1.0, m.executed_shares, None),
+        Message::OrderExecutedWithPrice(m) => (m.order_ref, 1.0, m.executed_shares, None),
+        Message::OrderCancel(m) => (m.order_ref, 2.0, m.cancelled_shares, None),
+        Message::OrderDelete(m) => (m.order_ref, 3.0, 0, None),
+        Message::OrderReplace(m) => (m.original_order_ref, 4.0, m.shares, Some(m.new_order_ref)),
+        _ => return None,
     };
     if order_ref != watched {
-        return;
+        return None;
     }
+    let new_ref = successor.unwrap_or(0);
     events.extend_from_slice(&[
         kind,
         f64::from(qty),
@@ -122,6 +125,7 @@ fn record_watch(watched: u64, events: &mut Vec<f64>, payload: &[u8], clock: u64)
         (new_ref >> 32) as f64,
         (new_ref & 0xffff_ffff) as f64,
     ]);
+    successor
 }
 
 /// Timestamp from the uniform header: offset 5, 6 bytes big-endian, ns
@@ -171,8 +175,10 @@ impl Engine {
                     }
                     if let Some(watched) = self.watched
                         && matches!(payload[0], b'E' | b'C' | b'X' | b'D' | b'U')
+                        && let Some(successor) =
+                            record_watch(watched, &mut self.watch_events, payload, self.clock)
                     {
-                        record_watch(watched, &mut self.watch_events, payload, self.clock);
+                        self.watched = Some(successor);
                     }
                     self.replay.feed(payload);
                     fed += 1;
